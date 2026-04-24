@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindCustomModal();
   bindViewModeToggle();
   bindGlobalKeys();
+  bindCatalogTouchDrag();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
   if (last && ROOMS.find(r => r.id === last)) selectRoom(last);
@@ -609,6 +610,92 @@ function setCollisionIndicator(n) {
     el.className = "collision-warn";
     el.textContent = `⚠ ${n} متداخلة`;
   }
+}
+
+// ---------- Touch drag from catalog (mobile) ----------
+// HTML5 drag-and-drop does not fire on most touch devices, so we wire up a
+// custom touch-based flow: long-press / move on a .cat-item creates a floating
+// ghost that follows the finger; release over the room SVG drops the item.
+function bindCatalogTouchDrag() {
+  const cat = document.getElementById("furniture-catalog");
+  if (!cat) return;
+  let active = null; // { el, ghost, groupId, itemId, startX, startY, moved }
+  const DRAG_THRESHOLD = 6;
+
+  cat.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    const item = e.target.closest(".cat-item");
+    if (!item) return;
+    if (e.target.closest(".cat-del")) return;
+    const t = e.touches[0];
+    active = {
+      el: item,
+      ghost: null,
+      groupId: item.dataset.groupId,
+      itemId: item.dataset.itemId,
+      startX: t.clientX,
+      startY: t.clientY,
+      moved: false,
+    };
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    if (!active) return;
+    const t = e.touches[0];
+    const dx = t.clientX - active.startX;
+    const dy = t.clientY - active.startY;
+    if (!active.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!active.moved) {
+      active.moved = true;
+      active.ghost = active.el.cloneNode(true);
+      active.ghost.classList.add("cat-item--dragging");
+      const rect = active.el.getBoundingClientRect();
+      active.ghost.style.width = rect.width + "px";
+      document.body.appendChild(active.ghost);
+    }
+    e.preventDefault(); // stop page scrolling while dragging
+    active.ghost.style.left = (t.clientX - 40) + "px";
+    active.ghost.style.top = (t.clientY - 30) + "px";
+  }, { passive: false });
+
+  document.addEventListener("touchend", () => {
+    if (!active) return;
+    const a = active;
+    active = null;
+    if (!a.ghost) return;
+    const rect = a.ghost.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    a.ghost.remove();
+    // Find element under the drop point, ignoring the ghost itself
+    const target = document.elementFromPoint(cx, cy);
+    const svg = target && target.closest ? target.closest("svg.room-svg") : null;
+    if (!svg) return;
+    const room = getRoom();
+    if (!room) return;
+    const item = findItem(a.groupId, a.itemId);
+    if (!item) return;
+    const pt = svgPointInRoom(svg, cx, cy);
+    const x = clamp(snap(pt.x - SVG_PADDING), item.w / 2, room.width - item.w / 2);
+    const y = clamp(snap(pt.y - SVG_PADDING), item.h / 2, room.depth - item.h / 2);
+    pushHistory();
+    const inst = {
+      instId: "i_" + Math.random().toString(36).slice(2, 9),
+      groupId: a.groupId, itemId: a.itemId, x, y, rotation: 0
+    };
+    state.layouts[room.id] = state.layouts[room.id] || [];
+    state.layouts[room.id].push(inst);
+    state.selectedInstId = inst.instId;
+    saveLayouts();
+    drawRoom();
+    renderSelection();
+    renderRoomList();
+  });
+
+  document.addEventListener("touchcancel", () => {
+    if (active && active.ghost) active.ghost.remove();
+    active = null;
+  });
 }
 
 // ---------- Drag & drop from catalog ----------

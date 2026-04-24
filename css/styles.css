@@ -183,6 +183,22 @@ main {
 }
 .cat-item:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); border-color: var(--accent); }
 .cat-item:active { cursor: grabbing; }
+/* Prevent text-selection/scroll while touch-dragging catalog items.
+   touch-action: none lets us fully capture the touch gesture; the sidebar is
+   still scrollable because the gaps between items and the group headers use
+   the default touch-action. */
+.cat-item { touch-action: none; -webkit-user-select: none; user-select: none; }
+.cat-item.cat-item--dragging {
+  position: fixed;
+  z-index: 10001;
+  pointer-events: none;
+  opacity: .92;
+  transform: scale(1.04);
+  box-shadow: 0 10px 24px rgba(0,0,0,.25);
+  border: 2px solid var(--accent);
+  background: var(--panel);
+  margin: 0;
+}
 .cat-icon { font-size: 22px; display: block; margin-bottom: 2px; }
 .cat-name { font-weight: 600; display: block; }
 .cat-size { font-size: 10px; color: var(--muted); }
