@@ -409,17 +409,41 @@ function drawRoom() {
   setCollisionIndicator(collisions.size);
 
   if (state.viewMode === "3d") {
-    // 3D view renders into the same container via the separate module.
-    container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
-    if (window.AptThreeView) {
-      window.AptThreeView.show(document.getElementById("three-wrap"), {
-        room, items, findItem,
-        onSelect: (instId) => { state.selectedInstId = instId; renderSelection(); }
-      });
-    } else {
+    if (!window.AptThreeView) {
       container.innerHTML = `<div class="placeholder"><div class="placeholder-icon">⏳</div><p>جارٍ تحميل محرك 3D…</p></div>`;
       // Retry shortly once the ES module finishes loading.
       setTimeout(() => { if (state.viewMode === "3d") drawRoom(); }, 200);
+      return;
+    }
+    // If the 3D scene is already mounted for this room, reconcile items in
+    // place (keeps camera & selection smooth across edits). Otherwise, build.
+    if (window.AptThreeView.isActiveFor(room.id)) {
+      window.AptThreeView.updateItems(items, findItem, state.selectedInstId);
+    } else {
+      container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
+      window.AptThreeView.show(document.getElementById("three-wrap"), {
+        room, items, findItem,
+        onSelect: (instId) => {
+          state.selectedInstId = instId;
+          renderSelection();
+        },
+        onDrop: ({ groupId, itemId, x, y }) => {
+          addItemAtRoomCoords(room, groupId, itemId, x, y);
+        },
+        onMove: ({ instId, x, y }) => {
+          const inst = (state.layouts[room.id] || []).find(i => i.instId === instId);
+          if (!inst) return;
+          pushHistory();
+          inst.x = x;
+          inst.y = y;
+          fitWithinRoom(inst);
+          saveLayouts();
+          renderSelection();
+          renderRoomList();
+          // Reconcile mesh transforms (but leave camera alone)
+          window.AptThreeView.updateItems(state.layouts[room.id] || [], findItem, state.selectedInstId);
+        },
+      });
     }
     return;
   }
@@ -669,33 +693,49 @@ function bindCatalogTouchDrag() {
     a.ghost.remove();
     // Find element under the drop point, ignoring the ghost itself
     const target = document.elementFromPoint(cx, cy);
-    const svg = target && target.closest ? target.closest("svg.room-svg") : null;
-    if (!svg) return;
     const room = getRoom();
     if (!room) return;
-    const item = findItem(a.groupId, a.itemId);
-    if (!item) return;
-    const pt = svgPointInRoom(svg, cx, cy);
-    const x = clamp(snap(pt.x - SVG_PADDING), item.w / 2, room.width - item.w / 2);
-    const y = clamp(snap(pt.y - SVG_PADDING), item.h / 2, room.depth - item.h / 2);
-    pushHistory();
-    const inst = {
-      instId: "i_" + Math.random().toString(36).slice(2, 9),
-      groupId: a.groupId, itemId: a.itemId, x, y, rotation: 0
-    };
-    state.layouts[room.id] = state.layouts[room.id] || [];
-    state.layouts[room.id].push(inst);
-    state.selectedInstId = inst.instId;
-    saveLayouts();
-    drawRoom();
-    renderSelection();
-    renderRoomList();
+    // 2D: dropped onto the room SVG
+    const svg = target && target.closest ? target.closest("svg.room-svg") : null;
+    if (svg) {
+      const pt = svgPointInRoom(svg, cx, cy);
+      addItemAtRoomCoords(room, a.groupId, a.itemId, pt.x - SVG_PADDING, pt.y - SVG_PADDING);
+      return;
+    }
+    // 3D: dropped onto the Three.js canvas inside the 3D wrap
+    const threeWrap = target && target.closest ? target.closest(".three-wrap") : null;
+    if (threeWrap && window.AptThreeView && window.AptThreeView.isActiveFor(room.id)) {
+      const pt3 = window.AptThreeView.screenToRoomCoords(cx, cy);
+      if (pt3) addItemAtRoomCoords(room, a.groupId, a.itemId, pt3.x, pt3.y);
+    }
   });
 
   document.addEventListener("touchcancel", () => {
     if (active && active.ghost) active.ghost.remove();
     active = null;
   });
+}
+
+// ---------- Shared: add a new inst at room coordinates ----------
+// Used by 2D drop (via setupDrop), catalog touch drop, and 3D drop.
+function addItemAtRoomCoords(room, groupId, itemId, rawX, rawY) {
+  const item = findItem(groupId, itemId);
+  if (!item) return null;
+  const x = clamp(snap(rawX), item.w / 2, room.width - item.w / 2);
+  const y = clamp(snap(rawY), item.h / 2, room.depth - item.h / 2);
+  pushHistory();
+  const inst = {
+    instId: "i_" + Math.random().toString(36).slice(2, 9),
+    groupId, itemId, x, y, rotation: 0
+  };
+  state.layouts[room.id] = state.layouts[room.id] || [];
+  state.layouts[room.id].push(inst);
+  state.selectedInstId = inst.instId;
+  saveLayouts();
+  drawRoom();
+  renderSelection();
+  renderRoomList();
+  return inst;
 }
 
 // ---------- Drag & drop from catalog ----------
