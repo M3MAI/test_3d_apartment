@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#2563eb" />
   <script type="importmap">
   {
     "imports": {
@@ -32,6 +34,10 @@
       <span class="divider" aria-hidden="true"></span>
       <button id="btn-theme" class="btn icon-btn" title="تبديل الوضع الداكن" aria-label="وضع داكن">🌙</button>
       <button id="btn-print" class="btn icon-btn" title="طباعة المخطط / PDF" aria-label="طباعة">🖨️</button>
+      <button id="btn-share" class="btn icon-btn" title="نسخ رابط مشاركة التصميم" aria-label="مشاركة">🔗</button>
+      <button id="btn-png"   class="btn icon-btn" title="حفظ لقطة من المشهد (PNG)" aria-label="لقطة">📸</button>
+      <button id="btn-glb"   class="btn icon-btn" title="تصدير ملف 3D (GLB)" aria-label="GLB">📦</button>
+      <button id="btn-help"  class="btn icon-btn" title="اختصارات لوحة المفاتيح (?)" aria-label="مساعدة">?</button>
       <span class="divider" aria-hidden="true"></span>
       <button id="btn-reset"  class="btn danger"  title="إعادة ضبط الغرفة الحالية">إعادة ضبط</button>
       <button id="btn-save"   class="btn primary" title="حفظ الترتيب محلياً">حفظ</button>
@@ -70,6 +76,12 @@
             <span id="item-count">0 قطعة</span>
             <span class="sep">•</span>
             <span id="collision-indicator" class="collision-none" title="عدد القطع المتداخلة">لا تداخل</span>
+            <span class="sep">•</span>
+            <span id="room-used" class="room-stat" title="نسبة المساحة المستخدمة">0%</span>
+            <span class="sep">•</span>
+            <span id="room-cost" class="room-stat" title="إجمالي التكلفة">0 ج.م</span>
+            <button id="btn-edit-room" class="btn sm ghost" title="تعديل أبعاد الغرفة وفتحاتها">✎ الغرفة</button>
+            <button id="btn-room-layouts" class="btn sm ghost" title="حفظ بدائل لترتيب الغرفة">💾 بدائل</button>
           </div>
         </div>
         <div class="view-controls" role="toolbar" aria-label="التحكم بالعرض">
@@ -84,6 +96,11 @@
           <span id="zoom-level" class="zoom-level" title="النسبة الحالية">100%</span>
           <button class="btn sm" id="btn-zoom-in"  title="تكبير (+)" aria-label="تكبير">+</button>
           <button class="btn sm" id="btn-zoom-fit" title="ملاءمة للشاشة (F)" aria-label="ملاءمة">⤢</button>
+          <button class="btn sm" id="btn-measure" title="أداة قياس (M)" aria-label="قياس">📏</button>
+          <label class="sun-slider" title="وقت اليوم (في 3D/جولة)">
+            <span aria-hidden="true">☀️</span>
+            <input type="range" id="sun-hour" min="0" max="24" step="0.25" value="13" />
+          </label>
         </div>
       </div>
 
@@ -190,10 +207,148 @@
     </div>
   </div>
 
+  <!-- Room editor modal -->
+  <div class="modal-backdrop" id="room-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="room-modal-title">
+      <header class="modal-head">
+        <h3 id="room-modal-title">تعديل الغرفة</h3>
+        <button class="btn sm icon-btn" id="room-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="fields-row">
+          <label class="field">
+            <span>الاسم</span>
+            <input type="text" id="re-name" maxlength="40" />
+          </label>
+          <label class="field">
+            <span>لون الجدار</span>
+            <input type="color" id="re-wall" />
+          </label>
+        </div>
+        <div class="fields-row">
+          <label class="field">
+            <span>العرض W <small>(سم)</small></span>
+            <input type="number" id="re-w" min="100" max="2000" step="5" />
+          </label>
+          <label class="field">
+            <span>العمق D <small>(سم)</small></span>
+            <input type="number" id="re-d" min="100" max="2000" step="5" />
+          </label>
+        </div>
+        <div class="fields-row">
+          <label class="field">
+            <span>الأرضية</span>
+            <select id="re-floor">
+              <option value="default">افتراضية (لون الغرفة)</option>
+              <option value="wood">خشب فاتح</option>
+              <option value="wood-dark">خشب داكن</option>
+              <option value="tile">سيراميك أبيض</option>
+              <option value="tile-gray">سيراميك رمادي</option>
+              <option value="carpet">موكيت بيج</option>
+              <option value="marble">رخام</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>خامة الجدار</span>
+            <select id="re-wallmat">
+              <option value="default">دهان (لون)</option>
+              <option value="paint-warm">دهان دافئ</option>
+              <option value="brick">طوب</option>
+              <option value="concrete">خرسانة</option>
+            </select>
+          </label>
+        </div>
+        <h4 class="field-label">الفتحات (أبواب وشبابيك)</h4>
+        <div id="re-openings" class="openings-list"></div>
+        <div class="row-actions">
+          <button class="btn sm" id="re-add-door">+ باب</button>
+          <button class="btn sm" id="re-add-window">+ شباك</button>
+        </div>
+        <p class="hint" id="re-error" hidden></p>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn danger" id="room-modal-reset" title="إرجاع للأبعاد الافتراضية">استعادة الافتراضي</button>
+        <div style="flex:1"></div>
+        <button class="btn" id="room-modal-cancel">إلغاء</button>
+        <button class="btn primary" id="room-modal-save">حفظ</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Shortcuts help modal -->
+  <div class="modal-backdrop" id="help-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+      <header class="modal-head">
+        <h3 id="help-modal-title">اختصارات لوحة المفاتيح</h3>
+        <button class="btn sm icon-btn" id="help-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body shortcuts">
+        <dl>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></dt><dd>تراجع / إعادة</dd>
+          <dt><kbd>R</kbd></dt><dd>دوران القطعة 90°</dd>
+          <dt><kbd>Shift</kbd>+<kbd>R</kbd></dt><dd>دوران دقيق 15°</dd>
+          <dt><kbd>D</kbd></dt><dd>تكرار القطعة</dd>
+          <dt><kbd>Delete</kbd> / <kbd>Backspace</kbd></dt><dd>حذف</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></dt><dd>نسخ / لصق (حتى عبر الغرف)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>تحديد الكل</dd>
+          <dt><kbd>Shift</kbd>+<kbd>Click</kbd></dt><dd>تحديد متعدد</dd>
+          <dt><kbd>Alt</kbd>+<kbd>Drag</kbd></dt><dd>لصق القطعة بأقرب جدار</dd>
+          <dt>أسهم</dt><dd>تحريك 5 سم (Shift: 25 سم)</dd>
+          <dt><kbd>M</kbd></dt><dd>أداة القياس</dd>
+          <dt><kbd>F</kbd></dt><dd>ملاءمة العرض</dd>
+          <dt><kbd>+</kbd> / <kbd>−</kbd></dt><dd>تكبير / تصغير</dd>
+          <dt><kbd>Esc</kbd></dt><dd>إلغاء التحديد / إغلاق النوافذ</dd>
+          <dt><kbd>?</kbd></dt><dd>عرض هذه القائمة</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room layouts modal (named A/B/C savepoints) -->
+  <div class="modal-backdrop" id="layouts-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="layouts-modal-title">
+      <header class="modal-head">
+        <h3 id="layouts-modal-title">ترتيبات بديلة للغرفة</h3>
+        <button class="btn sm icon-btn" id="layouts-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="hint">احفظ عدة ترتيبات للغرفة الواحدة وانتقل بينها.</p>
+        <div id="layouts-list" class="layouts-list"></div>
+        <div class="row-actions">
+          <input type="text" id="layout-name" placeholder="اسم الترتيب (مثال: بالكنبة الكبيرة)" maxlength="30" />
+          <button class="btn sm primary" id="btn-save-layout">+ حفظ الحالي</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding overlay (first visit only) -->
+  <div class="onboarding" id="onboarding" hidden>
+    <div class="ob-card">
+      <h3>👋 أهلاً بك في مصمم الشقة</h3>
+      <p>اختر غرفة من اليمين، واسحب أي قطعة من الكتالوج إلى المخطط. جرّب الأوضاع المختلفة:</p>
+      <ul>
+        <li><b>🏘️ الشقة</b> — رؤية كل الغرف مرة واحدة</li>
+        <li><b>2D</b> — مسقط علوي للتحرير الدقيق</li>
+        <li><b>3D</b> — معاينة ثلاثية الأبعاد</li>
+        <li><b>🚶 جولة</b> — تمشَّ داخل شقتك</li>
+      </ul>
+      <p>استخدم <b>?</b> لعرض كل الاختصارات.</p>
+      <button class="btn primary" id="ob-dismiss">فهمت، ابدأ</button>
+    </div>
+  </div>
+
   <script src="js/rooms.js"></script>
   <script src="js/furniture.js"></script>
   <script src="js/custom-items.js"></script>
   <script src="js/app.js"></script>
   <script type="module" src="js/three-view.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("service-worker.js").catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

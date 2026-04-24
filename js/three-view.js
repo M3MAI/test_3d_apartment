@@ -18,11 +18,14 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
 const WALL_HEIGHT   = 270;     // cm
 const WALL_THICK_3D = 10;      // cm
 
-let ctx = null;                // per-show rendering context
+let ctx = null;                // per-show rendering context  (room-level 3D)
+let aptCtx = null;             // per-show apartment walkthrough context
 
 // ---------- Disposal ----------
 function disposeObj(obj) {
@@ -42,6 +45,7 @@ function disposeObj(obj) {
 }
 
 function hide() {
+  hideApartment();
   if (!ctx) return;
   if (ctx.resizeObs) ctx.resizeObs.disconnect();
   if (ctx.raf) cancelAnimationFrame(ctx.raf);
@@ -53,6 +57,20 @@ function hide() {
     ctx.renderer.domElement.remove();
   }
   ctx = null;
+}
+
+function hideApartment() {
+  if (!aptCtx) return;
+  if (aptCtx.resizeObs) aptCtx.resizeObs.disconnect();
+  if (aptCtx.raf) cancelAnimationFrame(aptCtx.raf);
+  if (aptCtx.cleanup) aptCtx.cleanup();
+  if (aptCtx.controls && aptCtx.controls.dispose) aptCtx.controls.dispose();
+  disposeObj(aptCtx.scene);
+  if (aptCtx.renderer) {
+    aptCtx.renderer.dispose();
+    aptCtx.renderer.domElement.remove();
+  }
+  aptCtx = null;
 }
 
 function isActiveFor(roomId) {
@@ -653,4 +671,300 @@ function defaultHeight(item) {
   return minSide < 30 ? 40 : 70;
 }
 
-window.AptThreeView = { show, hide, updateItems, setSelection, isActiveFor, screenToRoomCoords };
+// ============================================================
+// Apartment walkthrough — full 3D first-person tour of the flat
+// ============================================================
+function aptBounds(rooms) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  rooms.forEach(r => {
+    const px = (r.plan && r.plan.x) || 0;
+    const py = (r.plan && r.plan.y) || 0;
+    minX = Math.min(minX, px);
+    minY = Math.min(minY, py);
+    maxX = Math.max(maxX, px + r.width);
+    maxY = Math.max(maxY, py + r.depth);
+  });
+  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+}
+
+function showApartment(container, { rooms, itemsByRoom, findItem }) {
+  hideApartment();
+  const bounds = aptBounds(rooms);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(bgColorFromTheme());
+  scene.fog = new THREE.Fog(bgColorFromTheme(), 500, 3000);
+
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1),
+    1, 8000
+  );
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
+  renderer.shadowMap.enabled = true;
+  renderer.domElement.style.touchAction = "none";
+  container.appendChild(renderer.domElement);
+
+  // Lights
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(bounds.w * 0.6, WALL_HEIGHT * 4, bounds.h * 0.4);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -bounds.w;
+  sun.shadow.camera.right = bounds.w;
+  sun.shadow.camera.top = bounds.h;
+  sun.shadow.camera.bottom = -bounds.h;
+  scene.add(sun);
+
+  // Unified floor spanning whole apartment (light neutral)
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xd8ccb8, roughness: 0.95 });
+  const floorGeo = new THREE.PlaneGeometry(bounds.w + 200, bounds.h + 200);
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(bounds.w / 2, 0, bounds.h / 2);
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  // Build each room with an offset matching its plan coords
+  const collidables = []; // wall meshes for player collision
+  rooms.forEach(room => {
+    const ox = ((room.plan && room.plan.x) || 0) - bounds.minX;
+    const oz = ((room.plan && room.plan.y) || 0) - bounds.minY;
+    buildRoomAt(scene, room, ox, oz, collidables);
+    const items = (itemsByRoom && itemsByRoom[room.id]) || [];
+    items.forEach(inst => {
+      const item = findItem(inst.groupId, inst.itemId);
+      if (!item) return;
+      const mesh = buildFurnitureMesh(inst, item);
+      if (!mesh) return;
+      mesh.position.x += ox;
+      mesh.position.z += oz;
+      scene.add(mesh);
+    });
+  });
+
+  // Start at the apartment entrance (first room's door-facing side)
+  const startX = bounds.w / 2;
+  const startZ = bounds.h - 30;
+  camera.position.set(startX, 160, startZ);
+  camera.lookAt(bounds.w / 2, 160, bounds.h / 2);
+
+  const controls = new PointerLockControls(camera, renderer.domElement);
+  scene.add(controls.getObject());
+
+  // Click-to-lock prompt
+  const prompt = document.createElement("div");
+  prompt.className = "walk-prompt";
+  prompt.innerHTML = "<div class='walk-prompt-inner'><h3>انقر لبدء الجولة</h3><p>W/A/S/D للتحرك • الفأرة للنظر • Shift للجري • Space للقفز • Esc للخروج</p></div>";
+  container.appendChild(prompt);
+  const onPromptClick = () => controls.lock();
+  prompt.addEventListener("click", onPromptClick);
+  controls.addEventListener("lock", () => { prompt.style.display = "none"; });
+  controls.addEventListener("unlock", () => { prompt.style.display = "flex"; });
+
+  // Movement state
+  const move = { f: 0, b: 0, l: 0, r: 0, up: false };
+  const velocity = new THREE.Vector3();
+  const direction = new THREE.Vector3();
+
+  const onKeyDown = (e) => {
+    if (e.code === "KeyW" || e.code === "ArrowUp") move.f = 1;
+    if (e.code === "KeyS" || e.code === "ArrowDown") move.b = 1;
+    if (e.code === "KeyA" || e.code === "ArrowLeft") move.l = 1;
+    if (e.code === "KeyD" || e.code === "ArrowRight") move.r = 1;
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") move.run = true;
+    if (e.code === "Space") move.up = true;
+  };
+  const onKeyUp = (e) => {
+    if (e.code === "KeyW" || e.code === "ArrowUp") move.f = 0;
+    if (e.code === "KeyS" || e.code === "ArrowDown") move.b = 0;
+    if (e.code === "KeyA" || e.code === "ArrowLeft") move.l = 0;
+    if (e.code === "KeyD" || e.code === "ArrowRight") move.r = 0;
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") move.run = false;
+    if (e.code === "Space") move.up = false;
+  };
+  document.addEventListener("keydown", onKeyDown);
+  document.addEventListener("keyup", onKeyUp);
+
+  aptCtx = {
+    scene, camera, renderer, controls,
+    rooms, itemsByRoom, findItem,
+    bounds, collidables, sun, ambient,
+    prompt,
+    cleanup: () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keyup", onKeyUp);
+      prompt.removeEventListener("click", onPromptClick);
+      prompt.remove();
+    },
+  };
+
+  aptCtx.resizeObs = new ResizeObserver(() => {
+    const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
+  aptCtx.resizeObs.observe(container);
+
+  let last = performance.now();
+  const loop = () => {
+    aptCtx.raf = requestAnimationFrame(loop);
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    if (controls.isLocked) {
+      const speed = (move.run ? 700 : 300) * dt; // cm/s
+      direction.set(move.r - move.l, 0, move.b - move.f);
+      direction.normalize();
+      // Movement in camera space
+      controls.moveRight(direction.x * speed);
+      controls.moveForward(-direction.z * speed);
+      // Eye height clamp + apartment bounds (soft box)
+      const p = controls.getObject().position;
+      p.y = 160;
+      p.x = Math.max(10, Math.min(bounds.w - 10, p.x));
+      p.z = Math.max(10, Math.min(bounds.h - 10, p.z));
+    }
+
+    renderer.render(scene, camera);
+  };
+  loop();
+}
+
+function isActiveApartment() {
+  return !!aptCtx;
+}
+function updateApartmentItems(itemsByRoom, findItem) {
+  if (!aptCtx) return;
+  // Simple approach: rebuild entire scene — walkthrough is viewed less often.
+  const container = aptCtx.renderer.domElement.parentElement;
+  const rooms = aptCtx.rooms;
+  hideApartment();
+  if (container) showApartment(container, { rooms, itemsByRoom, findItem });
+}
+
+// Build a room (walls + openings) with an offset into a shared scene.
+function buildRoomAt(scene, room, offX, offZ, collidables) {
+  const t = WALL_THICK_3D;
+  const walls = [
+    { length: room.width, anchor: [offX, 0, offZ],                          axis: "x", wall: "top" },
+    { length: room.width, anchor: [offX, 0, offZ + room.depth - t],         axis: "x", wall: "bottom" },
+    { length: room.depth, anchor: [offX, 0, offZ],                          axis: "z", wall: "left" },
+    { length: room.depth, anchor: [offX + room.width - t, 0, offZ],         axis: "z", wall: "right" },
+  ];
+  const wallColor = lighter(hexToInt(room.wallColor || "#cccccc"), 0.9);
+  const mat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9, side: THREE.DoubleSide });
+
+  walls.forEach(w => {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(w.length, 0);
+    shape.lineTo(w.length, WALL_HEIGHT);
+    shape.lineTo(0, WALL_HEIGHT);
+    shape.lineTo(0, 0);
+
+    const holes = [];
+    (room.openings || []).filter(o => o.wall === w.wall).forEach(o => {
+      const x0 = o.at;
+      const x1 = o.at + o.size;
+      const y0 = o.kind === "door" ? 0 : 90;
+      const y1 = o.kind === "door" ? Math.min(210, WALL_HEIGHT - 10) : Math.min(220, WALL_HEIGHT - 10);
+      const hole = new THREE.Path();
+      hole.moveTo(x0, y0); hole.lineTo(x1, y0); hole.lineTo(x1, y1); hole.lineTo(x0, y1); hole.lineTo(x0, y0);
+      holes.push(hole);
+    });
+    shape.holes = holes;
+
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geom, mat);
+    if (w.axis === "x") {
+      mesh.position.set(w.anchor[0], 0, w.anchor[2]);
+    } else {
+      mesh.rotation.y = -Math.PI / 2;
+      mesh.position.set(w.anchor[0] + t, 0, w.anchor[2]);
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.wallId = w.wall;
+    mesh.userData.roomId = room.id;
+    scene.add(mesh);
+    if (collidables) collidables.push(mesh);
+  });
+
+  // Floor tile for this room (colored by wallColor so you can see room boundaries)
+  const fMat = new THREE.MeshStandardMaterial({ color: hexToInt(room.wallColor), roughness: 0.95 });
+  const fGeo = new THREE.PlaneGeometry(room.width, room.depth);
+  const fMesh = new THREE.Mesh(fGeo, fMat);
+  fMesh.rotation.x = -Math.PI / 2;
+  fMesh.position.set(offX + room.width / 2, 0.5, offZ + room.depth / 2);
+  fMesh.receiveShadow = true;
+  scene.add(fMesh);
+}
+
+// ============================================================
+// Screenshot / GLB export utilities
+// ============================================================
+function screenshotPNG() {
+  const active = ctx || aptCtx;
+  if (!active) return null;
+  active.renderer.render(active.scene, active.camera);
+  return active.renderer.domElement.toDataURL("image/png");
+}
+
+function exportGLB() {
+  const active = ctx || aptCtx;
+  if (!active) return Promise.reject(new Error("no-3d-scene"));
+  return new Promise((resolve, reject) => {
+    try {
+      const exporter = new GLTFExporter();
+      exporter.parse(
+        active.scene,
+        (result) => {
+          const blob = new Blob([result], { type: "model/gltf-binary" });
+          resolve(blob);
+        },
+        (err) => reject(err),
+        { binary: true }
+      );
+    } catch (e) { reject(e); }
+  });
+}
+
+// Sun/time-of-day control: hour is 0..24
+function setSunHour(hour) {
+  const active = ctx || aptCtx;
+  if (!active) return;
+  const sun = active.sun || active.scene.children.find(o => o.isDirectionalLight);
+  if (!sun) return;
+  // Map hour 6..18 to sun arc above; 18..6 night
+  const t = ((hour - 6) / 12); // 0 at 6am, 1 at 6pm
+  const clamped = Math.max(0, Math.min(1, t));
+  const angle = clamped * Math.PI; // 0..PI
+  const radius = 3000;
+  const cx = (active.bounds ? active.bounds.w : active.room.width) / 2;
+  const cz = (active.bounds ? active.bounds.h : active.room.depth) / 2;
+  sun.position.set(cx + Math.cos(angle) * radius, Math.max(200, Math.sin(angle) * radius), cz - radius * 0.3);
+  // Night = dim; day = bright
+  const dayFactor = (hour >= 6 && hour <= 18) ? Math.sin(clamped * Math.PI) : 0.15;
+  sun.intensity = 0.2 + 0.9 * dayFactor;
+  // Ambient becomes bluish at night
+  const amb = active.ambient || active.scene.children.find(o => o.isAmbientLight);
+  if (amb) {
+    amb.intensity = 0.35 + 0.4 * dayFactor;
+    if (dayFactor < 0.3) amb.color.setHex(0x6b7a94);
+    else amb.color.setHex(0xffffff);
+  }
+}
+
+window.AptThreeView = {
+  show, hide, updateItems, setSelection, isActiveFor, screenToRoomCoords,
+  showApartment, isActiveApartment, updateApartmentItems, hideApartment,
+  screenshotPNG, exportGLB, setSunHour,
+};

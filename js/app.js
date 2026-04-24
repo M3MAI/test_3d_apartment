@@ -4,6 +4,10 @@
 const STORAGE_KEY     = "apt_layout_v1";
 const ACTIVE_ROOM_KEY = "apt_active_room";
 const THEME_KEY       = "apt_theme";
+const ROOM_OVERRIDES_KEY = "apt_room_overrides_v1";
+const NAMED_LAYOUTS_KEY  = "apt_named_layouts_v1";
+const PRICES_KEY         = "apt_prices_v1";        // { "groupId:itemId": number }
+const ONBOARDED_KEY      = "apt_onboarded_v1";
 const WALL_THICKNESS  = 10;      // cm, visual thickness of walls in plan
 const SVG_PADDING     = 40;      // svg viewport padding around the room
 const GRID_SNAP       = 5;       // cm snap grid
@@ -18,12 +22,61 @@ const state = {
   layouts: loadLayouts(),        // { roomId: [ {instId, itemId, groupId, x, y, rotation}, ... ] }
   activeRoomId: null,
   selectedInstId: null,
+  selectedInstIds: new Set(),    // multi-selection (supersets selectedInstId)
   view: { scale: 1, tx: 0, ty: 0 },
   catalogQuery: "",
+  catalogCategory: "all",
   history: [],                   // past snapshots (strings)
   future: [],                    // redo snapshots (strings)
-  viewMode: "2d",                // "2d" | "3d"
+  viewMode: "2d",                // "plan" | "2d" | "3d" | "walk"
+  measure: { active: false, p1: null, p2: null },
+  clipboard: null,               // { inst clone data } for Ctrl+C / Ctrl+V
+  prices: loadPrices(),
+  sunHour: 13,
 };
+
+function loadPrices() {
+  try { return JSON.parse(localStorage.getItem(PRICES_KEY) || "{}"); }
+  catch { return {}; }
+}
+function savePrices() {
+  try { localStorage.setItem(PRICES_KEY, JSON.stringify(state.prices)); } catch {}
+}
+function priceKey(inst) { return `${inst.groupId}:${inst.itemId}`; }
+function priceFor(inst) {
+  const item = findItem(inst.groupId, inst.itemId);
+  if (item && item.price != null) return item.price;      // custom items carry price
+  return state.prices[priceKey(inst)] || 0;
+}
+function setPrice(inst, price) {
+  state.prices[priceKey(inst)] = Math.max(0, price | 0);
+  savePrices();
+}
+
+function loadRoomOverrides() {
+  try { return JSON.parse(localStorage.getItem(ROOM_OVERRIDES_KEY) || "{}"); }
+  catch { return {}; }
+}
+function saveRoomOverrides(obj) {
+  try { localStorage.setItem(ROOM_OVERRIDES_KEY, JSON.stringify(obj)); } catch {}
+}
+// Apply overrides in-place to ROOMS at init (keeps the rest of the app oblivious).
+function applyRoomOverrides() {
+  const ov = loadRoomOverrides();
+  ROOMS.forEach(r => {
+    const o = ov[r.id];
+    if (!o) return;
+    if (o.name)   r.name = o.name;
+    if (typeof o.width === "number")  r.width = o.width;
+    if (typeof o.depth === "number")  r.depth = o.depth;
+    if (o.wallColor) r.wallColor = o.wallColor;
+    if (o.color) r.color = o.color;
+    if (Array.isArray(o.openings)) r.openings = o.openings;
+    if (o.plan) r.plan = o.plan;
+    if (o.floorTexture) r.floorTexture = o.floorTexture;
+    if (o.wallTexture)  r.wallTexture  = o.wallTexture;
+  });
+}
 
 function allGroups() {
   const groups = FURNITURE_GROUPS.slice();
@@ -35,15 +88,24 @@ function allGroups() {
 // ---------- Init ----------
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
+  applyRoomOverrides();
+  maybeLoadStateFromUrl();
   renderRoomList();
   renderCatalog();
   bindTopbar();
   bindCatalogSearch();
   bindViewControls();
   bindCustomModal();
+  bindRoomModal();
+  bindHelpModal();
+  bindLayoutsModal();
   bindViewModeToggle();
   bindGlobalKeys();
   bindCatalogTouchDrag();
+  bindSunSlider();
+  bindMeasure();
+  bindShareExportButtons();
+  bindOnboarding();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
   if (last && ROOMS.find(r => r.id === last)) selectRoom(last);
@@ -168,7 +230,27 @@ function renderCatalog() {
   const container = document.getElementById("furniture-catalog");
   container.innerHTML = "";
   const q = state.catalogQuery.trim().toLowerCase();
-  allGroups().forEach(group => {
+  const cat = state.catalogCategory || "all";
+
+  // Category chips row
+  const chips = document.createElement("div");
+  chips.className = "cat-chips";
+  const groups = allGroups();
+  const chipData = [{ id: "all", label: "الكل" }].concat(groups.map(g => ({ id: g.id, label: g.label })));
+  chipData.forEach(c => {
+    const b = document.createElement("button");
+    b.className = "cat-chip" + (cat === c.id ? " active" : "");
+    b.textContent = c.label;
+    b.addEventListener("click", () => {
+      state.catalogCategory = c.id;
+      renderCatalog();
+    });
+    chips.appendChild(b);
+  });
+  container.appendChild(chips);
+
+  groups.forEach(group => {
+    if (cat !== "all" && cat !== group.id) return;
     const matchingItems = group.items.filter(item =>
       !q || item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
     );
@@ -481,6 +563,7 @@ function drawRoom() {
 
   const items = state.layouts[room.id] || [];
   document.getElementById("item-count").textContent = `${items.length} قطعة`;
+  updateRoomStats(room, items);
 
   const vbW = room.width + SVG_PADDING * 2;
   const vbH = room.depth + SVG_PADDING * 2;
@@ -535,11 +618,13 @@ function drawRoom() {
 
   container.innerHTML = `
     <div class="room-svg-wrap">
+      ${state.measure.active ? `<div class="measure-hint">أداة القياس — انقر نقطتين، M للإيقاف</div>` : ""}
       <svg class="room-svg" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
         ${renderDefs()}
         <g id="viewport" transform="${viewportTransform(vbW, vbH)}">
           ${renderRoomShell(room)}
           <g id="fur-layer">${items.map(inst => renderFurniture(inst, collisions)).join("")}</g>
+          ${renderMeasureOverlay(room)}
         </g>
       </svg>
     </div>
@@ -550,6 +635,60 @@ function drawRoom() {
   setupDrop(svg, room);
   setupFurnitureInteractions(svg, room);
   setupZoomPan(svg, container);
+  if (state.measure.active) setupMeasureClicks(svg, room);
+}
+
+// ---------- Measure overlay (2D) ----------
+function renderMeasureOverlay(room) {
+  const { p1, p2 } = state.measure;
+  if (!p1) return "";
+  const ox = SVG_PADDING, oy = SVG_PADDING;
+  if (!p2) {
+    return `<circle class="measure-dot" cx="${ox + p1.x}" cy="${oy + p1.y}" r="6" />`;
+  }
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const dist = Math.hypot(dx, dy);
+  const mx = ox + (p1.x + p2.x) / 2;
+  const my = oy + (p1.y + p2.y) / 2;
+  return `
+    <line class="measure-line" x1="${ox + p1.x}" y1="${oy + p1.y}" x2="${ox + p2.x}" y2="${oy + p2.y}" />
+    <circle class="measure-dot" cx="${ox + p1.x}" cy="${oy + p1.y}" r="6" />
+    <circle class="measure-dot" cx="${ox + p2.x}" cy="${oy + p2.y}" r="6" />
+    <text class="measure-label" x="${mx}" y="${my - 10}" text-anchor="middle">${(dist/100).toFixed(2)} م</text>
+  `;
+}
+function setupMeasureClicks(svg, room) {
+  svg.addEventListener("click", e => {
+    if (!state.measure.active) return;
+    const pt = clientToRoomCoords(svg, e.clientX, e.clientY, room);
+    if (!pt) return;
+    if (!state.measure.p1 || state.measure.p2) {
+      state.measure.p1 = pt;
+      state.measure.p2 = null;
+    } else {
+      state.measure.p2 = pt;
+    }
+    drawRoom();
+  }, { capture: true });
+}
+function clientToRoomCoords(svg, clientX, clientY, room) {
+  const rect = svg.getBoundingClientRect();
+  const vbW = room.width + SVG_PADDING * 2;
+  const vbH = room.depth + SVG_PADDING * 2;
+  // Account for preserveAspectRatio=xMidYMid meet
+  const scale = Math.min(rect.width / vbW, rect.height / vbH);
+  const renderedW = vbW * scale;
+  const renderedH = vbH * scale;
+  const offX = (rect.width - renderedW) / 2;
+  const offY = (rect.height - renderedH) / 2;
+  const svgX = (clientX - rect.left - offX) / scale;
+  const svgY = (clientY - rect.top - offY) / scale;
+  // Undo viewport transform
+  const { scale: s, tx, ty } = state.view;
+  const cx = vbW / 2, cy = vbH / 2;
+  const localX = (svgX - (cx + tx)) / s + cx;
+  const localY = (svgY - (cy + ty)) / s + cy;
+  return { x: localX - SVG_PADDING, y: localY - SVG_PADDING };
 }
 
 function renderDefs() { return ""; }
@@ -1186,13 +1325,19 @@ function renderSelection() {
   }
   const item = findItem(inst.groupId, inst.itemId);
   panel.className = "";
+  const curPrice = priceFor(inst);
+  const priceReadOnly = item.price != null;  // custom items carry price; don't edit here
   panel.innerHTML = `
-    <div class="sel-row"><span>الاسم</span><b>${item.icon} ${item.name}</b></div>
+    <div class="sel-row"><span>الاسم</span><b>${item.icon || "📦"} ${item.name}</b></div>
     <div class="sel-row"><span>الأبعاد</span><b>${item.w}×${item.h} سم</b></div>
     <div class="sel-row"><span>الموقع</span><b>X: ${inst.x} , Y: ${inst.y}</b></div>
     <div class="sel-row">
       <span>الدوران</span>
       <input class="rot-input" type="number" min="0" max="359" step="15" value="${inst.rotation || 0}" aria-label="زاوية الدوران" />
+    </div>
+    <div class="sel-row">
+      <span>السعر <small>ج.م</small></span>
+      <input class="price-input" type="number" min="0" step="10" value="${curPrice || ""}" placeholder="0" aria-label="السعر" ${priceReadOnly ? "disabled" : ""} />
     </div>
     <div class="sel-actions">
       <button class="btn" data-action="rotate"      title="دوران 90° (R)">⟳ 90°</button>
@@ -1203,6 +1348,14 @@ function renderSelection() {
       <button class="btn danger" data-action="delete" title="حذف (Del)">✕ حذف</button>
     </div>
   `;
+  const priceInput = panel.querySelector(".price-input");
+  if (priceInput && !priceReadOnly) {
+    priceInput.addEventListener("change", () => {
+      const v = parseInt(priceInput.value, 10) || 0;
+      setPrice(inst, v);
+      updateRoomStats(getRoom(), state.layouts[state.activeRoomId] || []);
+    });
+  }
   panel.querySelectorAll("[data-action]").forEach(btn => {
     btn.addEventListener("click", () => handleSelAction(btn.dataset.action, inst));
   });
@@ -1281,6 +1434,27 @@ function bindGlobalKeys() {
     // Zoom keyboard
     if (e.key === "+" || e.key === "=") { e.preventDefault(); programmaticZoom(ZOOM_STEP); return; }
     if (e.key === "-" || e.key === "_") { e.preventDefault(); programmaticZoom(1 / ZOOM_STEP); return; }
+    // Help overlay
+    if (e.key === "?" || (e.shiftKey && e.key === "/")) { e.preventDefault(); toggleHelpModal(true); return; }
+    // Measure tool
+    if (e.key === "m" || e.key === "M") { e.preventDefault(); toggleMeasure(); return; }
+    // Copy/Paste & Select All (Ctrl)
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === "c") { e.preventDefault(); copySelection(); return; }
+      if (k === "v") { e.preventDefault(); pasteClipboard(); return; }
+      if (k === "a") { e.preventDefault(); selectAll(); return; }
+    }
+    // Escape: clear selection / close modals
+    if (e.key === "Escape") {
+      closeAllModals();
+      state.selectedInstId = null;
+      state.selectedInstIds.clear();
+      state.measure = { active: false, p1: null, p2: null };
+      drawRoom();
+      renderSelection();
+      return;
+    }
 
     // Selected-item shortcuts
     if (!state.selectedInstId || !state.activeRoomId) return;
@@ -1307,4 +1481,440 @@ function bindGlobalKeys() {
       renderSelection();
     }
   });
+}
+
+// ==========================================================================
+// Clipboard (Ctrl+C / Ctrl+V across rooms)
+// ==========================================================================
+function copySelection() {
+  if (!state.activeRoomId || !state.selectedInstId) { toast("لا يوجد تحديد للنسخ", "warn"); return; }
+  const inst = (state.layouts[state.activeRoomId] || []).find(i => i.instId === state.selectedInstId);
+  if (!inst) return;
+  state.clipboard = JSON.parse(JSON.stringify(inst));
+  toast("تم النسخ — Ctrl+V للصق");
+}
+function pasteClipboard() {
+  if (!state.clipboard) { toast("الحافظة فارغة", "warn"); return; }
+  if (!state.activeRoomId) { toast("اختر غرفة أولاً", "warn"); return; }
+  const room = getRoom();
+  pushHistory();
+  const arr = state.layouts[room.id] || (state.layouts[room.id] = []);
+  const copy = {
+    ...state.clipboard,
+    instId: "i_" + Math.random().toString(36).slice(2, 9),
+    x: (state.clipboard.x || room.width / 2) + 40,
+    y: (state.clipboard.y || room.depth / 2) + 40,
+  };
+  fitWithinRoom(copy);
+  arr.push(copy);
+  state.selectedInstId = copy.instId;
+  saveLayouts();
+  drawRoom();
+  renderSelection();
+  renderRoomList();
+  toast("تم اللصق");
+}
+function selectAll() {
+  if (!state.activeRoomId) return;
+  const items = state.layouts[state.activeRoomId] || [];
+  state.selectedInstIds = new Set(items.map(i => i.instId));
+  state.selectedInstId = items.length ? items[items.length - 1].instId : null;
+  drawRoom();
+  renderSelection();
+}
+
+// ==========================================================================
+// Undo/Redo button state
+// ==========================================================================
+function updateUndoRedoButtons() {
+  const u = document.getElementById("btn-undo");
+  const r = document.getElementById("btn-redo");
+  if (u) u.disabled = state.history.length === 0;
+  if (r) r.disabled = state.future.length === 0;
+}
+
+// ==========================================================================
+// Close any visible modal
+// ==========================================================================
+function closeAllModals() {
+  ["custom-modal", "room-modal", "help-modal", "layouts-modal"].forEach(id => {
+    const m = document.getElementById(id);
+    if (m) m.hidden = true;
+  });
+}
+
+// ==========================================================================
+// Room editor modal
+// ==========================================================================
+function bindRoomModal() {
+  const modal = document.getElementById("room-modal");
+  const openBtn = document.getElementById("btn-edit-room");
+  const closeBtn = document.getElementById("room-modal-close");
+  const cancelBtn = document.getElementById("room-modal-cancel");
+  const saveBtn = document.getElementById("room-modal-save");
+  const resetBtn = document.getElementById("room-modal-reset");
+  const addDoorBtn = document.getElementById("re-add-door");
+  const addWinBtn = document.getElementById("re-add-window");
+
+  let editingRoomId = null;
+
+  openBtn.addEventListener("click", () => {
+    const room = getRoom();
+    if (!room) { toast("اختر غرفة أولاً", "warn"); return; }
+    editingRoomId = room.id;
+    document.getElementById("re-name").value  = room.name;
+    document.getElementById("re-w").value     = room.width;
+    document.getElementById("re-d").value     = room.depth;
+    document.getElementById("re-wall").value  = room.wallColor || "#cccccc";
+    document.getElementById("re-floor").value = room.floorTexture || "default";
+    document.getElementById("re-wallmat").value = room.wallTexture || "default";
+    document.getElementById("re-error").hidden = true;
+    renderOpeningsList(JSON.parse(JSON.stringify(room.openings || [])));
+    modal.hidden = false;
+  });
+
+  closeBtn.addEventListener("click", () => modal.hidden = true);
+  cancelBtn.addEventListener("click", () => modal.hidden = true);
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+
+  addDoorBtn.addEventListener("click", () => addOpeningRow({ wall: "top", at: 50, size: 90, kind: "door", label: "باب" }));
+  addWinBtn.addEventListener("click",  () => addOpeningRow({ wall: "top", at: 50, size: 120, kind: "window", label: "شباك" }));
+
+  resetBtn.addEventListener("click", () => {
+    if (!editingRoomId) return;
+    if (!confirm("إرجاع الغرفة لأبعادها الافتراضية؟")) return;
+    const ov = loadRoomOverrides();
+    delete ov[editingRoomId];
+    saveRoomOverrides(ov);
+    // Reload page so ROOMS reflects defaults cleanly.
+    location.reload();
+  });
+
+  saveBtn.addEventListener("click", () => {
+    if (!editingRoomId) return;
+    const name = document.getElementById("re-name").value.trim();
+    const w = parseInt(document.getElementById("re-w").value, 10);
+    const d = parseInt(document.getElementById("re-d").value, 10);
+    if (!name || !(w > 0) || !(d > 0)) {
+      const err = document.getElementById("re-error");
+      err.textContent = "تحقق من الأبعاد والاسم";
+      err.hidden = false;
+      return;
+    }
+    const wallColor = document.getElementById("re-wall").value;
+    const floorTexture = document.getElementById("re-floor").value;
+    const wallTexture  = document.getElementById("re-wallmat").value;
+    const openings = readOpeningsList();
+    const room = ROOMS.find(r => r.id === editingRoomId);
+    if (!room) return;
+    room.name = name;
+    room.width = w;
+    room.depth = d;
+    room.wallColor = wallColor;
+    room.floorTexture = floorTexture;
+    room.wallTexture = wallTexture;
+    room.openings = openings;
+    // Persist override
+    const ov = loadRoomOverrides();
+    ov[editingRoomId] = { name, width: w, depth: d, wallColor, floorTexture, wallTexture, openings, plan: room.plan };
+    saveRoomOverrides(ov);
+    modal.hidden = true;
+    // Force full 3D rebuild since room geometry changed
+    if (window.AptThreeView && window.AptThreeView.isActiveFor(room.id)) window.AptThreeView.hide();
+    renderRoomList();
+    drawRoom();
+    toast("تم حفظ تعديلات الغرفة");
+  });
+}
+
+function renderOpeningsList(openings) {
+  const host = document.getElementById("re-openings");
+  host.innerHTML = "";
+  openings.forEach(op => addOpeningRow(op));
+}
+function addOpeningRow(op) {
+  const host = document.getElementById("re-openings");
+  const row = document.createElement("div");
+  row.className = "opening-row";
+  row.innerHTML = `
+    <select data-k="kind">
+      <option value="door" ${op.kind === "door" ? "selected" : ""}>باب</option>
+      <option value="window" ${op.kind === "window" ? "selected" : ""}>شباك</option>
+    </select>
+    <select data-k="wall">
+      <option value="top"    ${op.wall === "top"    ? "selected" : ""}>شمال</option>
+      <option value="bottom" ${op.wall === "bottom" ? "selected" : ""}>جنوب</option>
+      <option value="left"   ${op.wall === "left"   ? "selected" : ""}>غرب</option>
+      <option value="right"  ${op.wall === "right"  ? "selected" : ""}>شرق</option>
+    </select>
+    <label>موضع <input type="number" data-k="at"   min="0" step="5" value="${op.at}" /></label>
+    <label>عرض  <input type="number" data-k="size" min="30" step="5" value="${op.size}" /></label>
+    <button class="btn sm danger" data-k="del">✕</button>
+  `;
+  row.querySelector('[data-k="del"]').addEventListener("click", () => row.remove());
+  host.appendChild(row);
+}
+function readOpeningsList() {
+  const host = document.getElementById("re-openings");
+  return Array.from(host.children).map(row => {
+    const get = k => row.querySelector(`[data-k="${k}"]`).value;
+    return {
+      kind: get("kind"),
+      wall: get("wall"),
+      at: parseInt(get("at"), 10) || 0,
+      size: parseInt(get("size"), 10) || 80,
+      label: get("kind") === "door" ? "باب" : "شباك",
+    };
+  });
+}
+
+// ==========================================================================
+// Help / shortcuts modal
+// ==========================================================================
+function bindHelpModal() {
+  const modal = document.getElementById("help-modal");
+  document.getElementById("btn-help").addEventListener("click", () => toggleHelpModal(true));
+  document.getElementById("help-modal-close").addEventListener("click", () => toggleHelpModal(false));
+  modal.addEventListener("click", e => { if (e.target === modal) toggleHelpModal(false); });
+}
+function toggleHelpModal(on) {
+  document.getElementById("help-modal").hidden = !on;
+}
+
+// ==========================================================================
+// Named layouts per room (A / B / C savepoints)
+// ==========================================================================
+function loadNamedLayouts() {
+  try { return JSON.parse(localStorage.getItem(NAMED_LAYOUTS_KEY) || "{}"); }
+  catch { return {}; }
+}
+function saveNamedLayouts(obj) {
+  try { localStorage.setItem(NAMED_LAYOUTS_KEY, JSON.stringify(obj)); } catch {}
+}
+function bindLayoutsModal() {
+  const modal = document.getElementById("layouts-modal");
+  const openBtn = document.getElementById("btn-room-layouts");
+  const closeBtn = document.getElementById("layouts-modal-close");
+  const saveBtn = document.getElementById("btn-save-layout");
+
+  openBtn.addEventListener("click", () => {
+    if (!state.activeRoomId) { toast("اختر غرفة أولاً", "warn"); return; }
+    renderNamedLayoutsList();
+    modal.hidden = false;
+  });
+  closeBtn.addEventListener("click", () => modal.hidden = true);
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+  saveBtn.addEventListener("click", () => {
+    const name = document.getElementById("layout-name").value.trim() || ("ترتيب " + new Date().toLocaleString("ar-EG"));
+    const all = loadNamedLayouts();
+    const arr = all[state.activeRoomId] || (all[state.activeRoomId] = []);
+    arr.push({
+      id: "L" + Date.now(),
+      name,
+      savedAt: Date.now(),
+      items: JSON.parse(JSON.stringify(state.layouts[state.activeRoomId] || [])),
+    });
+    if (arr.length > 20) arr.shift(); // cap
+    saveNamedLayouts(all);
+    document.getElementById("layout-name").value = "";
+    renderNamedLayoutsList();
+    toast("تم حفظ الترتيب");
+  });
+}
+function renderNamedLayoutsList() {
+  const host = document.getElementById("layouts-list");
+  const all = loadNamedLayouts();
+  const arr = all[state.activeRoomId] || [];
+  if (arr.length === 0) {
+    host.innerHTML = `<p class="hint">لم تحفظ أي ترتيبات بعد.</p>`;
+    return;
+  }
+  host.innerHTML = arr.map(l => `
+    <div class="layout-row" data-id="${l.id}">
+      <div class="layout-info">
+        <b>${l.name}</b>
+        <span class="muted">${l.items.length} قطعة · ${new Date(l.savedAt).toLocaleDateString("ar-EG")}</span>
+      </div>
+      <div>
+        <button class="btn sm primary" data-act="load">تحميل</button>
+        <button class="btn sm danger"  data-act="del">✕</button>
+      </div>
+    </div>
+  `).join("");
+  host.querySelectorAll(".layout-row").forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector('[data-act="load"]').addEventListener("click", () => {
+      const all2 = loadNamedLayouts();
+      const entry = (all2[state.activeRoomId] || []).find(l => l.id === id);
+      if (!entry) return;
+      pushHistory();
+      state.layouts[state.activeRoomId] = JSON.parse(JSON.stringify(entry.items));
+      saveLayouts();
+      drawRoom();
+      renderRoomList();
+      renderSelection();
+      toast(`تم تحميل "${entry.name}"`);
+      document.getElementById("layouts-modal").hidden = true;
+    });
+    row.querySelector('[data-act="del"]').addEventListener("click", () => {
+      if (!confirm("حذف هذا الترتيب؟")) return;
+      const all2 = loadNamedLayouts();
+      all2[state.activeRoomId] = (all2[state.activeRoomId] || []).filter(l => l.id !== id);
+      saveNamedLayouts(all2);
+      renderNamedLayoutsList();
+    });
+  });
+}
+
+// ==========================================================================
+// Sun / time-of-day slider
+// ==========================================================================
+function bindSunSlider() {
+  const el = document.getElementById("sun-hour");
+  if (!el) return;
+  el.value = state.sunHour;
+  const apply = () => {
+    state.sunHour = parseFloat(el.value);
+    if (window.AptThreeView && window.AptThreeView.setSunHour) {
+      window.AptThreeView.setSunHour(state.sunHour);
+    }
+  };
+  el.addEventListener("input", apply);
+}
+
+// ==========================================================================
+// Measure tool (click two points to measure distance in 2D)
+// ==========================================================================
+function bindMeasure() {
+  const btn = document.getElementById("btn-measure");
+  if (btn) btn.addEventListener("click", toggleMeasure);
+}
+function toggleMeasure() {
+  state.measure.active = !state.measure.active;
+  state.measure.p1 = null;
+  state.measure.p2 = null;
+  const btn = document.getElementById("btn-measure");
+  if (btn) btn.classList.toggle("active", state.measure.active);
+  if (state.measure.active) toast("انقر نقطتين في الغرفة للقياس (M للإيقاف)");
+  drawRoom();
+}
+
+// ==========================================================================
+// Share / export buttons (URL, PNG, GLB)
+// ==========================================================================
+function bindShareExportButtons() {
+  document.getElementById("btn-share").addEventListener("click", shareViaUrl);
+  document.getElementById("btn-png").addEventListener("click", downloadScreenshot);
+  document.getElementById("btn-glb").addEventListener("click", downloadGlb);
+}
+async function shareViaUrl() {
+  // Encode layouts + overrides as compressed base64 → add to URL
+  try {
+    const payload = {
+      v: 1,
+      layouts: state.layouts,
+      overrides: loadRoomOverrides(),
+      prices: state.prices,
+    };
+    const json = JSON.stringify(payload);
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    const url = location.origin + location.pathname + "#s=" + b64;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("تم نسخ رابط المشاركة إلى الحافظة");
+    } catch {
+      prompt("انسخ الرابط التالي:", url);
+    }
+  } catch (e) {
+    toast("تعذّر إنشاء رابط المشاركة", "err");
+  }
+}
+function maybeLoadStateFromUrl() {
+  const h = location.hash || "";
+  const m = h.match(/^#s=(.+)$/);
+  if (!m) return;
+  try {
+    const json = decodeURIComponent(escape(atob(m[1])));
+    const data = JSON.parse(json);
+    if (!data || !data.layouts) return;
+    if (confirm("هل تريد استيراد التصميم المُشارَك من الرابط؟\n(سيستبدل تصميمك الحالي)")) {
+      if (data.overrides) saveRoomOverrides(data.overrides);
+      if (data.prices)    { state.prices = data.prices; savePrices(); }
+      state.layouts = data.layouts;
+      saveLayouts();
+      // Clear hash so refresh doesn't re-prompt.
+      history.replaceState(null, "", location.pathname);
+      location.reload();
+    }
+  } catch (e) { /* ignore malformed */ }
+}
+function downloadScreenshot() {
+  if (!window.AptThreeView || !window.AptThreeView.screenshotPNG) {
+    toast("افتح نمط 3D أو جولة أولاً", "warn");
+    return;
+  }
+  const url = window.AptThreeView.screenshotPNG();
+  if (!url) { toast("لا توجد لقطة — افتح 3D أولاً", "warn"); return; }
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `apartment-${Date.now()}.png`;
+  a.click();
+  toast("تم حفظ اللقطة");
+}
+async function downloadGlb() {
+  if (!window.AptThreeView || !window.AptThreeView.exportGLB) {
+    toast("افتح نمط 3D أو جولة أولاً", "warn");
+    return;
+  }
+  try {
+    const blob = await window.AptThreeView.exportGLB();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `apartment-${Date.now()}.glb`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("تم تصدير GLB");
+  } catch (e) {
+    toast("تعذّر تصدير GLB", "err");
+  }
+}
+
+// ==========================================================================
+// Onboarding (first visit)
+// ==========================================================================
+function bindOnboarding() {
+  const ob = document.getElementById("onboarding");
+  if (!ob) return;
+  if (!localStorage.getItem(ONBOARDED_KEY)) ob.hidden = false;
+  const dismiss = () => {
+    ob.hidden = true;
+    localStorage.setItem(ONBOARDED_KEY, "1");
+  };
+  document.getElementById("ob-dismiss").addEventListener("click", dismiss);
+  ob.addEventListener("click", e => { if (e.target === ob) dismiss(); });
+}
+
+// ==========================================================================
+// Stats (used area %, total cost) — updated from drawRoom()
+// ==========================================================================
+function updateRoomStats(room, items) {
+  const used = items.reduce((s, i) => {
+    const it = findItem(i.groupId, i.itemId);
+    return it ? s + (it.w * it.h) : s;
+  }, 0);
+  const total = room.width * room.depth;
+  const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+  const cost = items.reduce((s, i) => s + priceFor(i), 0);
+  const usedEl = document.getElementById("room-used");
+  const costEl = document.getElementById("room-cost");
+  if (usedEl) {
+    usedEl.textContent = pct + "%";
+    usedEl.classList.toggle("crowded", pct > 60);
+    usedEl.title = `نسبة المساحة المستخدمة — ${used/10000 | 0} م² من ${total/10000 | 0} م²`;
+  }
+  if (costEl) {
+    costEl.textContent = cost > 0 ? (cost.toLocaleString("ar-EG") + " ج.م") : "—";
+    costEl.title = `إجمالي التكلفة: ${cost} ج.م`;
+  }
 }
