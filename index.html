@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مصمم الشقة التفاعلي — Apartment Designer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🏠</span>
+      <div>
+        <h1>مصمم الشقة التفاعلي</h1>
+        <p class="subtitle">اختر غرفة وجرب ترتيب العفش قبل الشراء</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button id="btn-reset" class="btn danger" title="إعادة ضبط الغرفة الحالية">إعادة ضبط</button>
+      <button id="btn-save" class="btn primary" title="حفظ الترتيب محلياً">حفظ</button>
+      <button id="btn-export" class="btn" title="تنزيل الترتيب JSON">تصدير</button>
+      <label class="btn import-label">
+        استيراد
+        <input id="btn-import" type="file" accept="application/json" hidden />
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar">
+      <section class="room-picker">
+        <h2>الغرف</h2>
+        <ul id="room-list"></ul>
+      </section>
+      <section class="catalog">
+        <h2>قطع الأثاث</h2>
+        <p class="hint">اسحب أي قطعة إلى الغرفة</p>
+        <div id="furniture-catalog"></div>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <div class="stage-header">
+        <h2 id="room-title">اختر غرفة للبدء</h2>
+        <div class="stage-meta">
+          <span id="room-dims"></span>
+          <span class="sep">•</span>
+          <span id="item-count">0 قطعة</span>
+        </div>
+      </div>
+
+      <div id="room-container" class="room-container">
+        <div class="placeholder">
+          <div class="placeholder-icon">🏘️</div>
+          <p>اختر غرفة من القائمة لبدء تصميمها</p>
+        </div>
+      </div>
+
+      <div class="stage-help">
+        <span>اسحب القطع من اليمين لإضافتها</span>
+        <span>انقر لتحديد قطعة</span>
+        <span>⟳ دوران 90°</span>
+        <span>✕ حذف</span>
+      </div>
+    </section>
+
+    <aside class="details" id="details-panel">
+      <h2>تفاصيل القطعة</h2>
+      <div id="selection-info" class="empty">اختر قطعة لعرض تفاصيلها</div>
+    </aside>
+  </main>
+
+  <footer class="bottombar">
+    <span>تحليل مبني على فيديو التصوير — <a href="docs/ANALYSIS.md">راجع تقرير التحليل</a></span>
+    <span class="copyright">M3MAI / test_3d_apartment</span>
+  </footer>
+
+  <script src="js/rooms.js"></script>
+  <script src="js/furniture.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
