@@ -9,20 +9,26 @@
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
-<body>
+<body data-theme="light">
   <header class="topbar">
     <div class="brand">
       <span class="logo">🏠</span>
       <div>
         <h1>مصمم الشقة التفاعلي</h1>
-        <p class="subtitle">اختر غرفة وجرب ترتيب العفش قبل الشراء</p>
+        <p class="subtitle">اختر غرفة وجرّب ترتيب العفش قبل الشراء</p>
       </div>
     </div>
     <div class="top-actions">
-      <button id="btn-reset" class="btn danger" title="إعادة ضبط الغرفة الحالية">إعادة ضبط</button>
-      <button id="btn-save" class="btn primary" title="حفظ الترتيب محلياً">حفظ</button>
-      <button id="btn-export" class="btn" title="تنزيل الترتيب JSON">تصدير</button>
-      <label class="btn import-label">
+      <button id="btn-undo"  class="btn icon-btn" title="تراجع (Ctrl+Z)" aria-label="تراجع">↶</button>
+      <button id="btn-redo"  class="btn icon-btn" title="إعادة (Ctrl+Y)" aria-label="إعادة">↷</button>
+      <span class="divider" aria-hidden="true"></span>
+      <button id="btn-theme" class="btn icon-btn" title="تبديل الوضع الداكن" aria-label="وضع داكن">🌙</button>
+      <button id="btn-print" class="btn icon-btn" title="طباعة المخطط / PDF" aria-label="طباعة">🖨️</button>
+      <span class="divider" aria-hidden="true"></span>
+      <button id="btn-reset"  class="btn danger"  title="إعادة ضبط الغرفة الحالية">إعادة ضبط</button>
+      <button id="btn-save"   class="btn primary" title="حفظ الترتيب محلياً">حفظ</button>
+      <button id="btn-export" class="btn"         title="تنزيل الترتيب JSON">تصدير</button>
+      <label class="btn import-label" title="استيراد ترتيب من JSON">
         استيراد
         <input id="btn-import" type="file" accept="application/json" hidden />
       </label>
@@ -37,6 +43,7 @@
       </section>
       <section class="catalog">
         <h2>قطع الأثاث</h2>
+        <input type="search" id="cat-search" class="cat-search" placeholder="🔍 ابحث عن قطعة…" aria-label="ابحث في الكتالوج" />
         <p class="hint">اسحب أي قطعة إلى الغرفة</p>
         <div id="furniture-catalog"></div>
       </section>
@@ -44,11 +51,21 @@
 
     <section class="stage">
       <div class="stage-header">
-        <h2 id="room-title">اختر غرفة للبدء</h2>
-        <div class="stage-meta">
-          <span id="room-dims"></span>
-          <span class="sep">•</span>
-          <span id="item-count">0 قطعة</span>
+        <div class="stage-title">
+          <h2 id="room-title">اختر غرفة للبدء</h2>
+          <div class="stage-meta">
+            <span id="room-dims"></span>
+            <span class="sep">•</span>
+            <span id="item-count">0 قطعة</span>
+            <span class="sep">•</span>
+            <span id="collision-indicator" class="collision-none" title="عدد القطع المتداخلة">لا تداخل</span>
+          </div>
+        </div>
+        <div class="view-controls" role="toolbar" aria-label="التحكم بالعرض">
+          <button class="btn sm" id="btn-zoom-out" title="تصغير (−)" aria-label="تصغير">−</button>
+          <span id="zoom-level" class="zoom-level" title="النسبة الحالية">100%</span>
+          <button class="btn sm" id="btn-zoom-in"  title="تكبير (+)" aria-label="تكبير">+</button>
+          <button class="btn sm" id="btn-zoom-fit" title="ملاءمة للشاشة (F)" aria-label="ملاءمة">⤢</button>
         </div>
       </div>
 
@@ -60,10 +77,13 @@
       </div>
 
       <div class="stage-help">
-        <span>اسحب القطع من اليمين لإضافتها</span>
-        <span>انقر لتحديد قطعة</span>
-        <span>⟳ دوران 90°</span>
-        <span>✕ حذف</span>
+        <span>اسحب للإضافة</span>
+        <span>عجلة الفأرة للتكبير</span>
+        <span>اسحب بالفأرة الوسطى/الفراغ للتحريك</span>
+        <span>R دوران 90°</span>
+        <span>Shift+R دوران 15°</span>
+        <span>D تكرار</span>
+        <span>Delete حذف</span>
       </div>
     </section>
 
@@ -77,6 +97,8 @@
     <span>تحليل مبني على فيديو التصوير — <a href="docs/ANALYSIS.md">راجع تقرير التحليل</a></span>
     <span class="copyright">M3MAI / test_3d_apartment</span>
   </footer>
+
+  <div id="toast-host" aria-live="polite"></div>
 
   <script src="js/rooms.js"></script>
   <script src="js/furniture.js"></script>
