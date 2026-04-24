@@ -20,12 +20,38 @@ const CustomItems = {
     return this._cache;
   },
   _save() {
-    localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(this._cache || []));
+    try {
+      localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(this._cache || []));
+      return true;
+    } catch (e) {
+      if (e && (e.name === "QuotaExceededError" || e.code === 22)) {
+        if (window.toast) window.toast("ذاكرة المتصفح ممتلئة — احذف بعض العناصر المخصصة أو صدّر التصميم ثم أعد الضبط", "err");
+        else if (window.alert) window.alert("ذاكرة المتصفح ممتلئة. يرجى حذف بعض العناصر المخصصة.");
+      }
+      return false;
+    }
   },
   add(item) {
     this.all();
     this._cache.push(item);
-    this._save();
+    if (!this._save()) {
+      // Revert the in-memory push so cache stays consistent with storage.
+      this._cache.pop();
+      return false;
+    }
+    return true;
+  },
+  update(id, patch) {
+    this.all();
+    const idx = this._cache.findIndex(i => i.id === id);
+    if (idx === -1) return false;
+    const prev = this._cache[idx];
+    this._cache[idx] = { ...prev, ...patch, id };
+    if (!this._save()) {
+      this._cache[idx] = prev;
+      return false;
+    }
+    return true;
   },
   remove(id) {
     this.all();

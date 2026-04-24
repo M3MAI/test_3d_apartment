@@ -62,7 +62,13 @@ function loadLayouts() {
   }
 }
 function saveLayouts() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.layouts));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.layouts));
+  } catch (e) {
+    if (e && (e.name === "QuotaExceededError" || e.code === 22)) {
+      toast("ذاكرة المتصفح ممتلئة — صدّر التصميم ثم احذف بعض الغرف", "err");
+    }
+  }
 }
 
 // ---------- Undo/Redo ----------
@@ -121,6 +127,7 @@ function toggleTheme() {
 }
 
 // ---------- Toast ----------
+window.toast = toast; // exposed so submodules (e.g. CustomItems) can notify users
 function toast(msg, kind = "ok") {
   const host = document.getElementById("toast-host");
   if (!host) return;
@@ -181,12 +188,15 @@ function renderCatalog() {
       const thumb = isCustom && item.image
         ? `<img class="cat-thumb" src="${item.image}" alt="" />`
         : `<span class="cat-icon">${item.icon || "📦"}</span>`;
-      const delBtn = isCustom ? `<button class="cat-del" title="حذف" aria-label="حذف">✕</button>` : "";
+      const actions = isCustom
+        ? `<button class="cat-edit" title="تعديل" aria-label="تعديل">✎</button>
+           <button class="cat-del"  title="حذف"   aria-label="حذف">✕</button>`
+        : "";
       div.innerHTML = `
         ${thumb}
         <span class="cat-name">${item.name}</span>
         <span class="cat-size">${item.w}×${item.h} سم</span>
-        ${delBtn}
+        ${actions}
       `;
       if (isCustom) {
         div.querySelector(".cat-del").addEventListener("click", e => {
@@ -197,6 +207,11 @@ function renderCatalog() {
           renderCatalog();
           drawRoom();
           toast("تم حذف العنصر", "warn");
+        });
+        div.querySelector(".cat-edit").addEventListener("click", e => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (window.openCustomEdit) window.openCustomEdit(item);
         });
       }
       div.addEventListener("dragstart", e => {
@@ -231,6 +246,8 @@ function bindCustomModal() {
   const imgInput = document.getElementById("ci-image");
   const preview = document.getElementById("ci-preview");
   const err = document.getElementById("ci-error");
+  const title = document.getElementById("custom-modal-title");
+  const editIdInput = document.getElementById("ci-edit-id");
   let processed = null; // { image, sideColor }
 
   function reset() {
@@ -239,13 +256,34 @@ function bindCustomModal() {
     document.getElementById("ci-d").value = 60;
     document.getElementById("ci-h").value = 80;
     document.getElementById("ci-cat").value = "common";
+    document.getElementById("ci-price").value = "";
     imgInput.value = "";
     preview.innerHTML = `<span class="ph">لم يتم اختيار صورة</span>`;
     err.hidden = true; err.textContent = "";
     processed = null;
+    editIdInput.value = "";
+    title.textContent = "إضافة عنصر مخصص";
+    saveBtn.textContent = "إضافة للكتالوج";
   }
   function open() { reset(); modal.hidden = false; document.getElementById("ci-name").focus(); }
+  function openForEdit(item) {
+    reset();
+    editIdInput.value = item.id;
+    title.textContent = "تعديل عنصر مخصص";
+    saveBtn.textContent = "حفظ التعديلات";
+    document.getElementById("ci-name").value = item.name || "";
+    document.getElementById("ci-w").value = item.w;
+    document.getElementById("ci-d").value = item.h;
+    document.getElementById("ci-h").value = item.depth || 80;
+    document.getElementById("ci-cat").value = item.category || "common";
+    document.getElementById("ci-price").value = item.price || "";
+    if (item.image) preview.innerHTML = `<img src="${item.image}" alt="معاينة" />`;
+    // Keep existing image unless a new file is chosen.
+    processed = item.image ? { image: item.image, sideColor: item.sideColor || item.color } : null;
+    modal.hidden = false;
+  }
   function close() { modal.hidden = true; }
+  window.openCustomEdit = openForEdit;
 
   openBtn.addEventListener("click", open);
   closeBtn.addEventListener("click", close);
@@ -273,40 +311,67 @@ function bindCustomModal() {
     const d = parseInt(document.getElementById("ci-d").value, 10);
     const h = parseInt(document.getElementById("ci-h").value, 10);
     const cat = document.getElementById("ci-cat").value;
+    const priceRaw = document.getElementById("ci-price").value.trim();
+    const price = priceRaw === "" ? 0 : Math.max(0, parseInt(priceRaw, 10) || 0);
+    const editingId = editIdInput.value;
     if (!name) { err.textContent = "اكتب اسمًا للعنصر"; err.hidden = false; return; }
     if (!processed) { err.textContent = "ارفع صورة للعنصر"; err.hidden = false; return; }
     if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
-    const id = "c_" + Math.random().toString(36).slice(2, 9);
-    const item = {
-      id, name, icon: "📷",
-      w, h: d, depth: h,           // w × h (top-down footprint) + depth (vertical)
-      color: processed.sideColor, sideColor: processed.sideColor,
-      image: processed.image,
-      category: cat,
-    };
-    window.CustomItems.add(item);
-    renderCatalog();
-    toast("تمت الإضافة للكتالوج");
-    close();
+
+    if (editingId) {
+      const ok = window.CustomItems.update(editingId, {
+        name, w, h: d, depth: h, category: cat, price,
+        color: processed.sideColor, sideColor: processed.sideColor, image: processed.image,
+      });
+      if (ok) {
+        renderCatalog();
+        drawRoom();
+        renderSelection();
+        toast("تم تحديث العنصر");
+        close();
+      }
+    } else {
+      const id = "c_" + Math.random().toString(36).slice(2, 9);
+      const item = {
+        id, name, icon: "📷",
+        w, h: d, depth: h,
+        color: processed.sideColor, sideColor: processed.sideColor,
+        image: processed.image,
+        category: cat,
+        price,
+      };
+      if (window.CustomItems.add(item)) {
+        renderCatalog();
+        toast("تمت الإضافة للكتالوج");
+        close();
+      }
+    }
   });
 }
 
 function bindViewModeToggle() {
+  document.getElementById("btn-mode-plan").addEventListener("click", () => setViewMode("plan"));
   document.getElementById("btn-mode-2d").addEventListener("click", () => setViewMode("2d"));
   document.getElementById("btn-mode-3d").addEventListener("click", () => setViewMode("3d"));
+  document.getElementById("btn-mode-walk").addEventListener("click", () => setViewMode("walk"));
 }
 function setViewMode(mode) {
   if (mode === state.viewMode) return;
   state.viewMode = mode;
-  document.getElementById("btn-mode-2d").classList.toggle("active", mode === "2d");
-  document.getElementById("btn-mode-3d").classList.toggle("active", mode === "3d");
-  document.getElementById("btn-mode-2d").setAttribute("aria-pressed", mode === "2d");
-  document.getElementById("btn-mode-3d").setAttribute("aria-pressed", mode === "3d");
-  document.getElementById("stage-help-2d").hidden = mode !== "2d";
-  document.getElementById("stage-help-3d").hidden = mode !== "3d";
-  // zoom controls apply to 2D only
+  ["plan", "2d", "3d", "walk"].forEach(m => {
+    const btn = document.getElementById("btn-mode-" + m);
+    if (!btn) return;
+    btn.classList.toggle("active", mode === m);
+    btn.setAttribute("aria-pressed", mode === m);
+  });
+  ["2d", "3d", "plan", "walk"].forEach(m => {
+    const el = document.getElementById("stage-help-" + m);
+    if (el) el.hidden = mode !== m;
+  });
+  // zoom controls apply to 2D and plan
   ["btn-zoom-in", "btn-zoom-out", "btn-zoom-fit"].forEach(id => {
-    document.getElementById(id).disabled = mode !== "2d";
+    const el = document.getElementById(id);
+    if (el) el.disabled = (mode !== "2d" && mode !== "plan");
   });
   drawRoom();
 }
@@ -386,8 +451,23 @@ function getRoom() {
 
 function drawRoom() {
   const container = document.getElementById("room-container");
+
+  // Apartment overview — all rooms at once, not tied to active room.
+  if (state.viewMode === "plan") {
+    if (window.AptThreeView) window.AptThreeView.hide();
+    drawOverview(container);
+    return;
+  }
+
+  // First-person walkthrough — whole apartment in 3D with WASD.
+  if (state.viewMode === "walk") {
+    drawWalkthrough(container);
+    return;
+  }
+
   const room = getRoom();
   if (!room) {
+    if (window.AptThreeView) window.AptThreeView.hide();
     container.innerHTML = `<div class="placeholder"><div class="placeholder-icon">🏘️</div><p>اختر غرفة من القائمة لبدء تصميمها</p></div>`;
     document.getElementById("room-title").textContent = "اختر غرفة للبدء";
     document.getElementById("room-dims").textContent = "";
@@ -418,11 +498,11 @@ function drawRoom() {
     // If the 3D scene is already mounted for this room, reconcile items in
     // place (keeps camera & selection smooth across edits). Otherwise, build.
     if (window.AptThreeView.isActiveFor(room.id)) {
-      window.AptThreeView.updateItems(items, findItem, state.selectedInstId);
+      window.AptThreeView.updateItems(items, findItem, state.selectedInstId, collisions);
     } else {
       container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
       window.AptThreeView.show(document.getElementById("three-wrap"), {
-        room, items, findItem,
+        room, items, findItem, collisionSet: collisions,
         onSelect: (instId) => {
           state.selectedInstId = instId;
           renderSelection();
@@ -441,7 +521,10 @@ function drawRoom() {
           renderSelection();
           renderRoomList();
           // Reconcile mesh transforms (but leave camera alone)
-          window.AptThreeView.updateItems(state.layouts[room.id] || [], findItem, state.selectedInstId);
+          const nextItems = state.layouts[room.id] || [];
+          const nextCollisions = detectCollisions(nextItems);
+          setCollisionIndicator(nextCollisions.size);
+          window.AptThreeView.updateItems(nextItems, findItem, state.selectedInstId, nextCollisions);
         },
       });
     }
@@ -476,6 +559,141 @@ function viewportTransform(vbW, vbH) {
   const cx = vbW / 2, cy = vbH / 2;
   // scale around center, then translate
   return `translate(${cx + tx} ${cy + ty}) scale(${scale}) translate(${-cx} ${-cy})`;
+}
+
+// ---------- Apartment overview (all rooms in a single floor plan) ----------
+function apartmentBounds() {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  ROOMS.forEach(r => {
+    const px = (r.plan && r.plan.x) || 0;
+    const py = (r.plan && r.plan.y) || 0;
+    minX = Math.min(minX, px);
+    minY = Math.min(minY, py);
+    maxX = Math.max(maxX, px + r.width);
+    maxY = Math.max(maxY, py + r.depth);
+  });
+  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+}
+
+function drawOverview(container) {
+  document.getElementById("room-title").textContent = "مخطط الشقة الكامل";
+  const bounds = apartmentBounds();
+  document.getElementById("room-dims").textContent = `${(bounds.w/100).toFixed(2)} × ${(bounds.h/100).toFixed(2)} م`;
+  const totalItems = ROOMS.reduce((s, r) => s + (state.layouts[r.id] || []).length, 0);
+  document.getElementById("item-count").textContent = `${totalItems} قطعة (${ROOMS.length} غرف)`;
+  // Cross-room collisions are not meaningful; clear the indicator.
+  setCollisionIndicator(0);
+
+  const pad = 60;
+  const vbW = bounds.w + pad * 2;
+  const vbH = bounds.h + pad * 2;
+
+  const roomSvgs = ROOMS.map(r => renderOverviewRoom(r, bounds, pad)).join("");
+
+  container.innerHTML = `
+    <div class="room-svg-wrap plan-wrap">
+      <svg class="room-svg plan-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
+        <g id="viewport" transform="${viewportTransform(vbW, vbH)}">
+          <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="var(--panel)" opacity="0.35" />
+          ${roomSvgs}
+        </g>
+      </svg>
+    </div>
+  `;
+  updateZoomLabel();
+
+  const svg = container.querySelector("svg");
+  setupZoomPan(svg, container);
+  // Click a room → switch to 2D editing mode for that room.
+  svg.querySelectorAll("[data-plan-room]").forEach(g => {
+    g.addEventListener("click", (e) => {
+      if (e.shiftKey || e.button === 1) return; // reserved for pan
+      const id = g.getAttribute("data-plan-room");
+      selectRoom(id);
+      setViewMode("2d");
+    });
+  });
+}
+
+function renderOverviewRoom(room, bounds, pad) {
+  const ox = (room.plan && room.plan.x) || 0;
+  const oy = (room.plan && room.plan.y) || 0;
+  const x = pad + ox - bounds.minX;
+  const y = pad + oy - bounds.minY;
+  const items = state.layouts[room.id] || [];
+  const parts = [];
+  parts.push(`<rect x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="${room.wallColor}" stroke="${room.color}" stroke-width="${WALL_THICKNESS}" rx="2" />`);
+  // Openings
+  (room.openings || []).forEach(op => {
+    const t = WALL_THICKNESS;
+    let rx, ry, rw, rh;
+    switch (op.wall) {
+      case "top":    rx = x + op.at; ry = y - t/2; rw = op.size; rh = t * 1.4; break;
+      case "bottom": rx = x + op.at; ry = y + room.depth - t*0.7; rw = op.size; rh = t * 1.4; break;
+      case "left":   rx = x - t/2; ry = y + op.at; rw = t * 1.4; rh = op.size; break;
+      case "right":  rx = x + room.width - t*0.7; ry = y + op.at; rw = t * 1.4; rh = op.size; break;
+    }
+    const color = op.kind === "door" ? "var(--door)" : "var(--window)";
+    parts.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="var(--panel)" stroke="${color}" stroke-width="2" />`);
+  });
+  // Furniture (simplified — small rects with color)
+  items.forEach(inst => {
+    const item = findItem(inst.groupId, inst.itemId);
+    if (!item) return;
+    const fx = x + inst.x;
+    const fy = y + inst.y;
+    const rot = inst.rotation || 0;
+    if (inst.groupId === "custom" && item.image) {
+      parts.push(`<g transform="translate(${fx} ${fy}) rotate(${rot})">
+        <image x="${-item.w/2}" y="${-item.h/2}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice" href="${item.image}" />
+      </g>`);
+    } else {
+      const opa = item.opacity ?? 1;
+      parts.push(`<rect x="${fx - item.w/2}" y="${fy - item.h/2}" width="${item.w}" height="${item.h}" fill="${item.color}" opacity="${opa}" transform="rotate(${rot} ${fx} ${fy})" rx="2" />`);
+    }
+  });
+  // Room label
+  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 6}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--muted)" style="pointer-events:none">${room.name}</text>`);
+  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 32}" text-anchor="middle" font-size="16" fill="var(--muted)" opacity="0.7" style="pointer-events:none">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م — ${items.length} قطعة</text>`);
+  // Hit target for clicking into the room
+  return `<g class="plan-room" data-plan-room="${room.id}" style="cursor:pointer">
+    ${parts.join("")}
+    <rect class="plan-room-hit" x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="transparent" />
+  </g>`;
+}
+
+function drawWalkthrough(container) {
+  document.getElementById("room-title").textContent = "جولة داخل الشقة";
+  const bounds = apartmentBounds();
+  document.getElementById("room-dims").textContent = `${(bounds.w/100).toFixed(2)} × ${(bounds.h/100).toFixed(2)} م`;
+  const totalItems = ROOMS.reduce((s, r) => s + (state.layouts[r.id] || []).length, 0);
+  document.getElementById("item-count").textContent = `${totalItems} قطعة`;
+  setCollisionIndicator(0);
+
+  if (!window.AptThreeView) {
+    container.innerHTML = `<div class="placeholder"><div class="placeholder-icon">⏳</div><p>جارٍ تحميل محرك 3D…</p></div>`;
+    setTimeout(() => { if (state.viewMode === "walk") drawRoom(); }, 200);
+    return;
+  }
+
+  if (window.AptThreeView.isActiveApartment && window.AptThreeView.isActiveApartment()) {
+    // Re-sync items across rooms
+    window.AptThreeView.updateApartmentItems(gatherAllItems(), findItem);
+    return;
+  }
+
+  container.innerHTML = `<div class="three-wrap walk-wrap" id="three-wrap"></div>`;
+  window.AptThreeView.showApartment(document.getElementById("three-wrap"), {
+    rooms: ROOMS,
+    itemsByRoom: gatherAllItems(),
+    findItem,
+  });
+}
+
+function gatherAllItems() {
+  const map = {};
+  ROOMS.forEach(r => { map[r.id] = state.layouts[r.id] || []; });
+  return map;
 }
 
 function renderRoomShell(room) {

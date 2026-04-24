@@ -212,10 +212,9 @@ main {
   display: block;
 }
 .cat-item { position: relative; }
-.cat-del {
+.cat-del, .cat-edit {
   position: absolute;
   top: 2px;
-  inset-inline-start: 2px;
   width: 20px; height: 20px;
   border-radius: 50%;
   border: none;
@@ -226,8 +225,12 @@ main {
   line-height: 1;
   display: none;
 }
-.cat-item:hover .cat-del { display: block; }
-.cat-del:hover { background: var(--danger); }
+.cat-del  { inset-inline-start: 2px; }
+.cat-edit { inset-inline-start: 26px; }
+.cat-item:hover .cat-del,
+.cat-item:hover .cat-edit { display: block; }
+.cat-del:hover  { background: var(--danger); }
+.cat-edit:hover { background: var(--accent); }
 .catalog-head {
   display: flex;
   align-items: center;

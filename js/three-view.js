@@ -63,6 +63,7 @@ function isActiveFor(roomId) {
 function show(container, opts) {
   hide(); // idempotent
   const { room, items, findItem, onSelect, onDrop, onMove } = opts;
+  const initialCollisions = opts.collisionSet || new Set();
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(bgColorFromTheme());
@@ -173,6 +174,7 @@ function show(container, opts) {
   };
 
   renderItems(ctx, items);
+  applyCollisionTint(ctx, initialCollisions);
   attachPointerHandlers(ctx, container);
   attachDomDropHandlers(ctx, container);
 
@@ -269,11 +271,36 @@ function applyInstTransform(mesh, inst, item) {
   mesh.userData.rotation = inst.rotation || 0;
 }
 
-function updateItems(items, findItem, selectedInstId) {
+function updateItems(items, findItem, selectedInstId, collisionSet) {
   if (!ctx) return;
   ctx.findItem = findItem;
   renderItems(ctx, items);
   ctx.selectedInstId = selectedInstId || null;
+  applyCollisionTint(ctx, collisionSet || new Set());
+}
+
+// Red emissive tint on any mesh whose instId is in the collision set.
+function applyCollisionTint(ctx, collisionSet) {
+  ctx.instMeshes.forEach((mesh, instId) => {
+    const collides = collisionSet.has(instId);
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach(m => {
+      if (!m) return;
+      if (collides) {
+        if (!m.userData._origEmissive) {
+          m.userData._origEmissive = (m.emissive && m.emissive.getHex) ? m.emissive.getHex() : 0x000000;
+          m.userData._origEmissiveIntensity = m.emissiveIntensity ?? 1;
+        }
+        if (m.emissive && m.emissive.setHex) m.emissive.setHex(0xff3333);
+        m.emissiveIntensity = 0.55;
+      } else if (m.userData._origEmissive !== undefined) {
+        if (m.emissive && m.emissive.setHex) m.emissive.setHex(m.userData._origEmissive);
+        m.emissiveIntensity = m.userData._origEmissiveIntensity ?? 1;
+        delete m.userData._origEmissive;
+        delete m.userData._origEmissiveIntensity;
+      }
+    });
+  });
 }
 
 function setSelection(instId) {
@@ -585,8 +612,9 @@ function buildFurnitureMesh(inst, item) {
       map: tex, roughness: 0.9,
       emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.25,
     });
-    const frontMatBack = frontMat.clone();
-    materials = [sideMat, sideMat.clone(), sideMat.clone(), sideMat.clone(), frontMat, frontMatBack];
+    // Box face order: [+x, -x, +y, -y, +z, -z] = right, left, top, bottom, front, back
+    // Only the front face shows the uploaded image; other faces use the edge-sampled side color.
+    materials = [sideMat, sideMat.clone(), sideMat.clone(), sideMat.clone(), frontMat, sideMat.clone()];
   } else {
     const mat = new THREE.MeshStandardMaterial({
       color: hexToInt(item.color || "#888888"),

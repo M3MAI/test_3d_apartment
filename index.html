@@ -74,8 +74,10 @@
         </div>
         <div class="view-controls" role="toolbar" aria-label="التحكم بالعرض">
           <div class="view-mode-toggle" role="group" aria-label="نمط العرض">
-            <button class="btn sm active" id="btn-mode-2d" title="مسقط علوي 2D" aria-pressed="true">2D</button>
-            <button class="btn sm"        id="btn-mode-3d" title="معاينة ثلاثية الأبعاد" aria-pressed="false">3D</button>
+            <button class="btn sm"        id="btn-mode-plan" title="مخطط الشقة الكامل" aria-pressed="false">🏘️ الشقة</button>
+            <button class="btn sm active" id="btn-mode-2d"   title="مسقط علوي 2D" aria-pressed="true">2D</button>
+            <button class="btn sm"        id="btn-mode-3d"   title="معاينة ثلاثية الأبعاد" aria-pressed="false">3D</button>
+            <button class="btn sm"        id="btn-mode-walk" title="جولة داخل الشقة (first-person)" aria-pressed="false">🚶 جولة</button>
           </div>
           <span class="view-sep" aria-hidden="true"></span>
           <button class="btn sm" id="btn-zoom-out" title="تصغير (−)" aria-label="تصغير">−</button>
@@ -107,6 +109,15 @@
         <span>R دوران • D تكرار • Delete حذف</span>
         <span>الزر الأيمن أو Shift+drag لتدوير الكاميرا</span>
       </div>
+      <div class="stage-help" id="stage-help-plan" hidden>
+        <span>انقر أي غرفة للدخول في وضع التحرير</span>
+        <span>عجلة الفأرة للتكبير • اسحب بالفراغ للتحريك</span>
+        <span>هذا المخطّط يظهر كل الغرف وعفشها معًا</span>
+      </div>
+      <div class="stage-help" id="stage-help-walk" hidden>
+        <span>W/A/S/D للتحرك • الفأرة للنظر • Space للقفز</span>
+        <span>Shift للجري • انقر للبدء • Esc للخروج</span>
+      </div>
     </section>
 
     <aside class="details" id="details-panel">
@@ -129,6 +140,7 @@
         <h3 id="custom-modal-title">إضافة عنصر مخصص</h3>
         <button class="btn sm icon-btn" id="custom-modal-close" aria-label="إغلاق">✕</button>
       </header>
+      <input type="hidden" id="ci-edit-id" value="" />
       <div class="modal-body">
         <label class="field">
           <span>الاسم</span>
@@ -153,16 +165,22 @@
             <input type="number" id="ci-h" min="5"  max="350" step="1" value="80" />
           </label>
         </div>
-        <label class="field">
-          <span>الفئة</span>
-          <select id="ci-cat">
-            <option value="common">عام</option>
-            <option value="living">صالون ومعيشة</option>
-            <option value="bedroom">غرف النوم</option>
-            <option value="kitchen">مطبخ</option>
-            <option value="bathroom">حمامات</option>
-          </select>
-        </label>
+        <div class="fields-row">
+          <label class="field">
+            <span>الفئة</span>
+            <select id="ci-cat">
+              <option value="common">عام</option>
+              <option value="living">صالون ومعيشة</option>
+              <option value="bedroom">غرف النوم</option>
+              <option value="kitchen">مطبخ</option>
+              <option value="bathroom">حمامات</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>السعر <small>(جنيه — اختياري)</small></span>
+            <input type="number" id="ci-price" min="0" step="1" placeholder="0" />
+          </label>
+        </div>
         <p class="hint" id="ci-error" hidden></p>
       </div>
       <footer class="modal-foot">

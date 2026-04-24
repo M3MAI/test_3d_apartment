@@ -13,6 +13,7 @@ const ROOMS = [
     color: "#7ba8d4",
     wallColor: "#c6d6ea",
     description: "الغرفة الفاخرة بسقف معلق وإضاءة LED مدفونة. تستخدم لاستقبال الضيوف.",
+    plan: { x: 0, y: 0 },
     width: 500,
     depth: 400,
     openings: [
@@ -28,6 +29,7 @@ const ROOMS = [
     color: "#e4d5b7",
     wallColor: "#f0e3c9",
     description: "غرفة المعيشة اليومية والتلفزيون.",
+    plan: { x: 510, y: 0 },
     width: 450,
     depth: 350,
     openings: [
@@ -42,6 +44,7 @@ const ROOMS = [
     color: "#2a6fa6",
     wallColor: "#c8dbea",
     description: "غرفة نوم بحائط أزرق بترولي مميز.",
+    plan: { x: 460, y: 570 },
     width: 400,
     depth: 350,
     openings: [
@@ -56,6 +59,7 @@ const ROOMS = [
     color: "#4aa5a0",
     wallColor: "#d2e9e6",
     description: "غرفة أصغر مناسبة للأطفال بلون تركواز.",
+    plan: { x: 870, y: 620 },
     width: 350,
     depth: 300,
     openings: [
@@ -70,6 +74,7 @@ const ROOMS = [
     color: "#8a1f3c",
     wallColor: "#e8cad3",
     description: "غرفة نوم رئيسية بحائط عنابي قوي.",
+    plan: { x: 0, y: 570 },
     width: 450,
     depth: 350,
     openings: [
@@ -84,6 +89,7 @@ const ROOMS = [
     color: "#d8b38a",
     wallColor: "#f2e3ce",
     description: "المطبخ — سيراميك كريمي وشباك خلفي.",
+    plan: { x: 970, y: 0 },
     width: 300,
     depth: 250,
     openings: [
@@ -98,6 +104,7 @@ const ROOMS = [
     color: "#6fa8a4",
     wallColor: "#dfece9",
     description: "حمام كامل بالبانيو — بلاط أخضر مميز.",
+    plan: { x: 510, y: 360 },
     width: 250,
     depth: 200,
     openings: [
@@ -112,6 +119,7 @@ const ROOMS = [
     color: "#c0c4cf",
     wallColor: "#e8ebf2",
     description: "توالت خدمي صغير.",
+    plan: { x: 800, y: 360 },
     width: 150,
     depth: 150,
     openings: [
