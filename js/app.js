@@ -1184,19 +1184,70 @@ function setupFurnitureInteractions(svg, room) {
       let dx = p.x - startPt.x;
       let dy = p.y - startPt.y;
       if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) moved = true;
-      const rot = (inst.rotation || 0) % 180;
-      const effW = rot === 90 ? item.h : item.w;
-      const effH = rot === 90 ? item.w : item.h;
-      inst.x = clamp(snap(startX + dx), effW/2, room.width  - effW/2);
-      inst.y = clamp(snap(startY + dy), effH/2, room.depth  - effH/2);
+      const rot0 = (inst.rotation || 0) % 180;
+      const effW0 = rot0 === 90 ? item.h : item.w;
+      const effH0 = rot0 === 90 ? item.w : item.h;
+      let nx = clamp(snap(startX + dx), effW0/2, room.width  - effW0/2);
+      let ny = clamp(snap(startY + dy), effH0/2, room.depth  - effH0/2);
+
+      const altSnap = ev.altKey || ev.metaKey;
+      let snappedRotation = inst.rotation || 0;
+
+      // --- Wall snap (Alt+drag): choose nearest wall, align item to it ---
+      if (altSnap) {
+        const dT = ny - effH0/2;                    // distance from top wall
+        const dB = (room.depth - ny) - effH0/2;     // bottom
+        const dL = nx - effW0/2;                    // left
+        const dR = (room.width - nx) - effW0/2;     // right
+        const min = Math.min(dT, dB, dL, dR);
+        if (min === dT)      { ny = effH0/2; snappedRotation = 0; }
+        else if (min === dB) { ny = room.depth - effH0/2; snappedRotation = 180; }
+        else if (min === dL) { nx = effW0/2; snappedRotation = 90; }
+        else                 { nx = room.width - effW0/2; snappedRotation = 270; }
+      }
+
+      // --- Alignment guides: snap to other items' centers/edges within 6cm ---
+      const guides = [];
+      const SNAP_TOL = 6; // cm
+      const others = (state.layouts[room.id] || []).filter(i => i.instId !== instId);
+      others.forEach(o => {
+        const oi = findItem(o.groupId, o.itemId);
+        if (!oi) return;
+        const or = (o.rotation || 0) % 180;
+        const ow = or === 90 ? oi.h : oi.w;
+        const oh = or === 90 ? oi.w : oi.h;
+        // Vertical guides (match x centers)
+        if (Math.abs(nx - o.x) < SNAP_TOL) { nx = o.x; guides.push({ x: o.x, vert: true }); }
+        // Left edges
+        if (Math.abs((nx - effW0/2) - (o.x - ow/2)) < SNAP_TOL) { nx = o.x - ow/2 + effW0/2; guides.push({ x: o.x - ow/2, vert: true }); }
+        // Right edges
+        if (Math.abs((nx + effW0/2) - (o.x + ow/2)) < SNAP_TOL) { nx = o.x + ow/2 - effW0/2; guides.push({ x: o.x + ow/2, vert: true }); }
+        // Horizontal guides (match y centers)
+        if (Math.abs(ny - o.y) < SNAP_TOL) { ny = o.y; guides.push({ y: o.y, vert: false }); }
+        if (Math.abs((ny - effH0/2) - (o.y - oh/2)) < SNAP_TOL) { ny = o.y - oh/2 + effH0/2; guides.push({ y: o.y - oh/2, vert: false }); }
+        if (Math.abs((ny + effH0/2) - (o.y + oh/2)) < SNAP_TOL) { ny = o.y + oh/2 - effH0/2; guides.push({ y: o.y + oh/2, vert: false }); }
+      });
+
+      inst.x = nx;
+      inst.y = ny;
+      if (snappedRotation !== (inst.rotation || 0)) inst.rotation = snappedRotation;
+      // Re-clamp using possibly-new rotation
+      const rot2 = (inst.rotation || 0) % 180;
+      const effW = rot2 === 90 ? item.h : item.w;
+      const effH = rot2 === 90 ? item.w : item.h;
+      inst.x = clamp(inst.x, effW/2, room.width  - effW/2);
+      inst.y = clamp(inst.y, effH/2, room.depth  - effH/2);
+
       const g2 = svg.querySelector(`.furniture[data-inst-id="${instId}"]`);
       if (g2) g2.setAttribute("transform", `translate(${SVG_PADDING + inst.x} ${SVG_PADDING + inst.y}) rotate(${inst.rotation || 0})`);
+      drawAlignGuides(svg, guides, room);
     }
     function onUp() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
+      drawAlignGuides(svg, [], room); // clear
       if (moved) {
         // push the pre-drag state to history so undo reverts the drag
         state.history.push(preSnapshot);
@@ -1893,6 +1944,43 @@ function bindOnboarding() {
   };
   document.getElementById("ob-dismiss").addEventListener("click", dismiss);
   ob.addEventListener("click", e => { if (e.target === ob) dismiss(); });
+}
+
+// ==========================================================================
+// Alignment guides (pink dashed lines drawn during drag)
+// ==========================================================================
+function drawAlignGuides(svg, guides, room) {
+  let layer = svg.querySelector("#align-guides-layer");
+  const viewport = svg.querySelector("#viewport");
+  if (!viewport) return;
+  if (!layer) {
+    layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    layer.id = "align-guides-layer";
+    viewport.appendChild(layer);
+  }
+  layer.innerHTML = "";
+  if (!guides.length) return;
+  // Dedupe
+  const seen = new Set();
+  guides.forEach(g => {
+    const key = g.vert ? "v" + g.x : "h" + g.y;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    ln.setAttribute("class", "align-guide");
+    if (g.vert) {
+      ln.setAttribute("x1", SVG_PADDING + g.x);
+      ln.setAttribute("x2", SVG_PADDING + g.x);
+      ln.setAttribute("y1", SVG_PADDING);
+      ln.setAttribute("y2", SVG_PADDING + room.depth);
+    } else {
+      ln.setAttribute("y1", SVG_PADDING + g.y);
+      ln.setAttribute("y2", SVG_PADDING + g.y);
+      ln.setAttribute("x1", SVG_PADDING);
+      ln.setAttribute("x2", SVG_PADDING + room.width);
+    }
+    layer.appendChild(ln);
+  });
 }
 
 // ==========================================================================
