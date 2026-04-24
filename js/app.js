@@ -11,6 +11,7 @@ const HISTORY_LIMIT   = 60;      // undo stack depth
 const ZOOM_MIN        = 0.3;
 const ZOOM_MAX        = 4.0;
 const ZOOM_STEP       = 1.15;
+const DEFAULT_WALL_HEIGHT = 270;  // cm, used by 3D view when room has no explicit height
 
 // ---------- State ----------
 const state = {
@@ -21,7 +22,15 @@ const state = {
   catalogQuery: "",
   history: [],                   // past snapshots (strings)
   future: [],                    // redo snapshots (strings)
+  viewMode: "2d",                // "2d" | "3d"
 };
+
+function allGroups() {
+  const groups = FURNITURE_GROUPS.slice();
+  const custom = window.CustomItems ? window.CustomItems.group() : null;
+  if (custom && custom.items.length) groups.push(custom);
+  return groups;
+}
 
 // ---------- Init ----------
 document.addEventListener("DOMContentLoaded", () => {
@@ -31,6 +40,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bindTopbar();
   bindCatalogSearch();
   bindViewControls();
+  bindCustomModal();
+  bindViewModeToggle();
   bindGlobalKeys();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
@@ -149,7 +160,7 @@ function renderCatalog() {
   const container = document.getElementById("furniture-catalog");
   container.innerHTML = "";
   const q = state.catalogQuery.trim().toLowerCase();
-  FURNITURE_GROUPS.forEach(group => {
+  allGroups().forEach(group => {
     const matchingItems = group.items.filter(item =>
       !q || item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
     );
@@ -165,11 +176,28 @@ function renderCatalog() {
       div.dataset.itemId = item.id;
       div.draggable = true;
       div.title = `${item.name} — ${item.w}×${item.h} سم`;
+      const isCustom = group.id === "custom";
+      const thumb = isCustom && item.image
+        ? `<img class="cat-thumb" src="${item.image}" alt="" />`
+        : `<span class="cat-icon">${item.icon || "📦"}</span>`;
+      const delBtn = isCustom ? `<button class="cat-del" title="حذف" aria-label="حذف">✕</button>` : "";
       div.innerHTML = `
-        <span class="cat-icon">${item.icon}</span>
+        ${thumb}
         <span class="cat-name">${item.name}</span>
         <span class="cat-size">${item.w}×${item.h} سم</span>
+        ${delBtn}
       `;
+      if (isCustom) {
+        div.querySelector(".cat-del").addEventListener("click", e => {
+          e.stopPropagation();
+          e.preventDefault();
+          if (!confirm(`حذف "${item.name}" من الكتالوج؟ (لن يُحذف من الغرف المحفوظة)`)) return;
+          window.CustomItems.remove(item.id);
+          renderCatalog();
+          drawRoom();
+          toast("تم حذف العنصر", "warn");
+        });
+      }
       div.addEventListener("dragstart", e => {
         e.dataTransfer.setData("text/apt-item", JSON.stringify({ groupId: group.id, itemId: item.id }));
         e.dataTransfer.effectAllowed = "copy";
@@ -193,6 +221,95 @@ function bindCatalogSearch() {
 }
 
 // ---------- Topbar ----------
+function bindCustomModal() {
+  const modal = document.getElementById("custom-modal");
+  const openBtn = document.getElementById("btn-add-custom");
+  const closeBtn = document.getElementById("custom-modal-close");
+  const cancelBtn = document.getElementById("custom-modal-cancel");
+  const saveBtn = document.getElementById("custom-modal-save");
+  const imgInput = document.getElementById("ci-image");
+  const preview = document.getElementById("ci-preview");
+  const err = document.getElementById("ci-error");
+  let processed = null; // { image, sideColor }
+
+  function reset() {
+    document.getElementById("ci-name").value = "";
+    document.getElementById("ci-w").value = 60;
+    document.getElementById("ci-d").value = 60;
+    document.getElementById("ci-h").value = 80;
+    document.getElementById("ci-cat").value = "common";
+    imgInput.value = "";
+    preview.innerHTML = `<span class="ph">لم يتم اختيار صورة</span>`;
+    err.hidden = true; err.textContent = "";
+    processed = null;
+  }
+  function open() { reset(); modal.hidden = false; document.getElementById("ci-name").focus(); }
+  function close() { modal.hidden = true; }
+
+  openBtn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  cancelBtn.addEventListener("click", close);
+  modal.addEventListener("click", e => { if (e.target === modal) close(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !modal.hidden) close(); });
+
+  imgInput.addEventListener("change", async () => {
+    const file = imgInput.files[0];
+    if (!file) return;
+    try {
+      processed = await window.processCustomImage(file);
+      preview.innerHTML = `<img src="${processed.image}" alt="معاينة" />`;
+      err.hidden = true;
+    } catch {
+      processed = null;
+      err.textContent = "تعذّر قراءة الصورة";
+      err.hidden = false;
+    }
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const name = document.getElementById("ci-name").value.trim();
+    const w = parseInt(document.getElementById("ci-w").value, 10);
+    const d = parseInt(document.getElementById("ci-d").value, 10);
+    const h = parseInt(document.getElementById("ci-h").value, 10);
+    const cat = document.getElementById("ci-cat").value;
+    if (!name) { err.textContent = "اكتب اسمًا للعنصر"; err.hidden = false; return; }
+    if (!processed) { err.textContent = "ارفع صورة للعنصر"; err.hidden = false; return; }
+    if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
+    const id = "c_" + Math.random().toString(36).slice(2, 9);
+    const item = {
+      id, name, icon: "📷",
+      w, h: d, depth: h,           // w × h (top-down footprint) + depth (vertical)
+      color: processed.sideColor, sideColor: processed.sideColor,
+      image: processed.image,
+      category: cat,
+    };
+    window.CustomItems.add(item);
+    renderCatalog();
+    toast("تمت الإضافة للكتالوج");
+    close();
+  });
+}
+
+function bindViewModeToggle() {
+  document.getElementById("btn-mode-2d").addEventListener("click", () => setViewMode("2d"));
+  document.getElementById("btn-mode-3d").addEventListener("click", () => setViewMode("3d"));
+}
+function setViewMode(mode) {
+  if (mode === state.viewMode) return;
+  state.viewMode = mode;
+  document.getElementById("btn-mode-2d").classList.toggle("active", mode === "2d");
+  document.getElementById("btn-mode-3d").classList.toggle("active", mode === "3d");
+  document.getElementById("btn-mode-2d").setAttribute("aria-pressed", mode === "2d");
+  document.getElementById("btn-mode-3d").setAttribute("aria-pressed", mode === "3d");
+  document.getElementById("stage-help-2d").hidden = mode !== "2d";
+  document.getElementById("stage-help-3d").hidden = mode !== "3d";
+  // zoom controls apply to 2D only
+  ["btn-zoom-in", "btn-zoom-out", "btn-zoom-fit"].forEach(id => {
+    document.getElementById(id).disabled = mode !== "2d";
+  });
+  drawRoom();
+}
+
 function bindTopbar() {
   document.getElementById("btn-reset").addEventListener("click", () => {
     if (!state.activeRoomId) return;
@@ -290,9 +407,28 @@ function drawRoom() {
   const collisions = detectCollisions(items);
   setCollisionIndicator(collisions.size);
 
+  if (state.viewMode === "3d") {
+    // 3D view renders into the same container via the separate module.
+    container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
+    if (window.AptThreeView) {
+      window.AptThreeView.show(document.getElementById("three-wrap"), {
+        room, items, findItem,
+        onSelect: (instId) => { state.selectedInstId = instId; renderSelection(); }
+      });
+    } else {
+      container.innerHTML = `<div class="placeholder"><div class="placeholder-icon">⏳</div><p>جارٍ تحميل محرك 3D…</p></div>`;
+      // Retry shortly once the ES module finishes loading.
+      setTimeout(() => { if (state.viewMode === "3d") drawRoom(); }, 200);
+    }
+    return;
+  }
+
+  if (window.AptThreeView) window.AptThreeView.hide();
+
   container.innerHTML = `
     <div class="room-svg-wrap">
-      <svg class="room-svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
+      <svg class="room-svg" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
+        ${renderDefs()}
         <g id="viewport" transform="${viewportTransform(vbW, vbH)}">
           ${renderRoomShell(room)}
           <g id="fur-layer">${items.map(inst => renderFurniture(inst, collisions)).join("")}</g>
@@ -307,6 +443,8 @@ function drawRoom() {
   setupFurnitureInteractions(svg, room);
   setupZoomPan(svg, container);
 }
+
+function renderDefs() { return ""; }
 
 function viewportTransform(vbW, vbH) {
   const { scale, tx, ty } = state.view;
@@ -398,16 +536,28 @@ function renderFurniture(inst, collisionSet) {
   if (inst.instId === state.selectedInstId) classes.push("selected");
   if (collisionSet && collisionSet.has(inst.instId)) classes.push("collides");
   const opacity = item.opacity ?? 1;
+  const isCustom = inst.groupId === "custom" && item.image;
+  const rot = inst.rotation || 0;
+  // For custom items: render the uploaded image directly inside the body, plus
+  // a subtle colored stroke. For built-ins: filled rect with the library color.
+  const body = isCustom
+    ? `<image class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" href="${item.image}" opacity="${opacity}"></image>
+       <rect class="fur-frame" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="none" stroke="${item.sideColor || item.color || '#555'}" stroke-width="2" rx="4" />`
+    : `<rect class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="${item.color}" opacity="${opacity}" rx="4" />`;
+  const labelFill = isCustom ? "rgba(255,255,255,.95)" : "#fff";
+  const labelStroke = isCustom ? "rgba(0,0,0,.55)" : "none";
   return `
-    <g class="${classes.join(" ")}" data-inst-id="${inst.instId}" transform="translate(${cx} ${cy}) rotate(${inst.rotation || 0})">
-      <rect class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="${item.color}" opacity="${opacity}" rx="4" />
-      <text class="fur-icon" x="0" y="6">${item.icon}</text>
-      <text class="fur-label" x="0" y="${h/2 - 6}">${item.name}</text>
+    <g class="${classes.join(" ")}" data-inst-id="${inst.instId}" transform="translate(${cx} ${cy}) rotate(${rot})">
+      ${body}
+      <g transform="rotate(${-rot})" style="pointer-events:none">
+        ${isCustom ? "" : `<text class="fur-icon" x="0" y="6" fill="${labelFill}">${item.icon || "📦"}</text>`}
+        <text class="fur-label" x="0" y="${Math.min(h, w)/2 - 6}" fill="${labelFill}" stroke="${labelStroke}" stroke-width=".5" paint-order="stroke">${item.name}</text>
+      </g>
     </g>`;
 }
 
 function findItem(groupId, itemId) {
-  const group = FURNITURE_GROUPS.find(g => g.id === groupId);
+  const group = allGroups().find(g => g.id === groupId);
   if (!group) return null;
   return group.items.find(i => i.id === itemId);
 }
