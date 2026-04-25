@@ -1215,17 +1215,26 @@ function setupFurnitureInteractions(svg, room) {
       const altSnap = ev.altKey || ev.metaKey;
       let snappedRotation = inst.rotation || 0;
 
-      // --- Wall snap (Alt+drag): choose nearest wall, align item to it ---
+      // --- Wall snap (Alt+drag): choose nearest wall, align item flush to it ---
       if (altSnap) {
         const dT = ny - effH0/2;                    // distance from top wall
         const dB = (room.depth - ny) - effH0/2;     // bottom
         const dL = nx - effW0/2;                    // left
         const dR = (room.width - nx) - effW0/2;     // right
         const min = Math.min(dT, dB, dL, dR);
-        if (min === dT)      { ny = effH0/2; snappedRotation = 0; }
-        else if (min === dB) { ny = room.depth - effH0/2; snappedRotation = 180; }
-        else if (min === dL) { nx = effW0/2; snappedRotation = 90; }
-        else                 { nx = room.width - effW0/2; snappedRotation = 270; }
+        // Pick snappedRotation first, then compute effective dims for THAT rotation
+        // so the item ends up flush with the wall (previous code used pre-rotation dims).
+        if      (min === dT) snappedRotation = 0;
+        else if (min === dB) snappedRotation = 180;
+        else if (min === dL) snappedRotation = 90;
+        else                 snappedRotation = 270;
+        const snapRotMod = snappedRotation % 180;
+        const effWSnap = snapRotMod === 90 ? item.h : item.w;
+        const effHSnap = snapRotMod === 90 ? item.w : item.h;
+        if      (snappedRotation === 0)   ny = effHSnap/2;
+        else if (snappedRotation === 180) ny = room.depth - effHSnap/2;
+        else if (snappedRotation === 90)  nx = effWSnap/2;
+        else                              nx = room.width - effWSnap/2;
       }
 
       // --- Alignment guides: snap to other items' centers/edges within 6cm ---
