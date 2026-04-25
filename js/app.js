@@ -1533,6 +1533,18 @@ function bindGlobalKeys() {
 
     if (typing) return;
 
+    // In walkthrough mode the scene owns movement keys (WASD, arrows, space,
+    // shift). Also skip the editing shortcuts (D duplicate, R rotate, Delete,
+    // M measure, F fit) so strafing/running/etc. don't accidentally mutate
+    // or rebuild the scene. Only `?` (help) still works in walk mode, handled
+    // before this guard if we ever want it.
+    if (state.viewMode === "walk") {
+      if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+        e.preventDefault(); toggleHelpModal(true);
+      }
+      return;
+    }
+
     // Fit view
     if (e.key === "f" || e.key === "F") { e.preventDefault(); fitView(); return; }
     // Zoom keyboard
