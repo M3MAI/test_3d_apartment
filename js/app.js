@@ -360,7 +360,7 @@ function bindCustomModal() {
     document.getElementById("ci-h").value = item.depth || 80;
     document.getElementById("ci-cat").value = item.category || "common";
     document.getElementById("ci-price").value = item.price || "";
-    if (item.image) preview.innerHTML = `<img src="${item.image}" alt="معاينة" />`;
+    if (item.image) preview.innerHTML = `<img src="${esc(item.image)}" alt="معاينة" />`;
     // Keep existing image unless a new file is chosen.
     processed = item.image ? { image: item.image, sideColor: item.sideColor || item.color } : null;
     modal.hidden = false;
@@ -379,7 +379,7 @@ function bindCustomModal() {
     if (!file) return;
     try {
       processed = await window.processCustomImage(file);
-      preview.innerHTML = `<img src="${processed.image}" alt="معاينة" />`;
+      preview.innerHTML = `<img src="${esc(processed.image)}" alt="معاينة" />`;
       err.hidden = true;
     } catch {
       processed = null;
