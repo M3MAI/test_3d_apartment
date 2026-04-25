@@ -210,8 +210,8 @@ function renderRoomList() {
     const li = document.createElement("li");
     li.dataset.roomId = room.id;
     li.innerHTML = `
-      <span class="room-swatch" style="background:${room.color}"></span>
-      <span>${room.name}</span>
+      <span class="room-swatch" style="background:${safeColor(room.color)}"></span>
+      <span>${esc(room.name)}</span>
       ${count ? `<span class="room-count">${count}</span>` : ""}
     `;
     li.addEventListener("click", () => selectRoom(room.id));
@@ -268,16 +268,16 @@ function renderCatalog() {
       div.title = `${item.name} — ${item.w}×${item.h} سم`;
       const isCustom = group.id === "custom";
       const thumb = isCustom && item.image
-        ? `<img class="cat-thumb" src="${item.image}" alt="" />`
-        : `<span class="cat-icon">${item.icon || "📦"}</span>`;
+        ? `<img class="cat-thumb" src="${esc(item.image)}" alt="" />`
+        : `<span class="cat-icon">${esc(item.icon || "📦")}</span>`;
       const actions = isCustom
         ? `<button class="cat-edit" title="تعديل" aria-label="تعديل">✎</button>
            <button class="cat-del"  title="حذف"   aria-label="حذف">✕</button>`
         : "";
       div.innerHTML = `
         ${thumb}
-        <span class="cat-name">${item.name}</span>
-        <span class="cat-size">${item.w}×${item.h} سم</span>
+        <span class="cat-name">${esc(item.name)}</span>
+        <span class="cat-size">${Number(item.w) || 0}×${Number(item.h) || 0} سم</span>
         ${actions}
       `;
       if (isCustom) {
@@ -544,7 +544,11 @@ function drawRoom() {
 
   // First-person walkthrough — whole apartment in 3D with WASD.
   if (state.viewMode === "walk") {
-    if (window.AptThreeView) window.AptThreeView.hide();
+    // Only tear down the room-level 3D context; leave aptCtx intact so
+    // drawWalkthrough() can take its incremental-update path.
+    if (window.AptThreeView && window.AptThreeView.hideRoomOnly) {
+      window.AptThreeView.hideRoomOnly();
+    }
     drawWalkthrough(container);
     return;
   }
@@ -763,7 +767,7 @@ function renderOverviewRoom(room, bounds, pad) {
   const y = pad + oy - bounds.minY;
   const items = state.layouts[room.id] || [];
   const parts = [];
-  parts.push(`<rect x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="${room.wallColor}" stroke="${room.color}" stroke-width="${WALL_THICKNESS}" rx="2" />`);
+  parts.push(`<rect x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="${safeColor(room.wallColor, "#f3eee4")}" stroke="${safeColor(room.color, "#888")}" stroke-width="${WALL_THICKNESS}" rx="2" />`);
   // Openings
   (room.openings || []).forEach(op => {
     const t = WALL_THICKNESS;
@@ -786,18 +790,18 @@ function renderOverviewRoom(room, bounds, pad) {
     const rot = inst.rotation || 0;
     if (inst.groupId === "custom" && item.image) {
       parts.push(`<g transform="translate(${fx} ${fy}) rotate(${rot})">
-        <image x="${-item.w/2}" y="${-item.h/2}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice" href="${item.image}" />
+        <image x="${-item.w/2}" y="${-item.h/2}" width="${item.w}" height="${item.h}" preserveAspectRatio="xMidYMid slice" href="${esc(item.image)}" />
       </g>`);
     } else {
       const opa = item.opacity ?? 1;
-      parts.push(`<rect x="${fx - item.w/2}" y="${fy - item.h/2}" width="${item.w}" height="${item.h}" fill="${item.color}" opacity="${opa}" transform="rotate(${rot} ${fx} ${fy})" rx="2" />`);
+      parts.push(`<rect x="${fx - item.w/2}" y="${fy - item.h/2}" width="${item.w}" height="${item.h}" fill="${safeColor(item.color, "#bbb")}" opacity="${opa}" transform="rotate(${rot} ${fx} ${fy})" rx="2" />`);
     }
   });
   // Room label
-  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 6}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--muted)" style="pointer-events:none">${room.name}</text>`);
+  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 6}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--muted)" style="pointer-events:none">${esc(room.name)}</text>`);
   parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 32}" text-anchor="middle" font-size="16" fill="var(--muted)" opacity="0.7" style="pointer-events:none">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م — ${items.length} قطعة</text>`);
   // Hit target for clicking into the room
-  return `<g class="plan-room" data-plan-room="${room.id}" style="cursor:pointer">
+  return `<g class="plan-room" data-plan-room="${esc(room.id)}" style="cursor:pointer">
     ${parts.join("")}
     <rect class="plan-room-hit" x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="transparent" />
   </g>`;
@@ -844,7 +848,7 @@ function renderRoomShell(room) {
   const h = room.depth;
   const parts = [];
 
-  parts.push(`<rect x="${px}" y="${py}" width="${w}" height="${h}" fill="${room.wallColor}" stroke="${room.color}" stroke-width="${WALL_THICKNESS}" />`);
+  parts.push(`<rect x="${px}" y="${py}" width="${w}" height="${h}" fill="${safeColor(room.wallColor, "#f3eee4")}" stroke="${safeColor(room.color, "#888")}" stroke-width="${WALL_THICKNESS}" />`);
 
   let grid = "";
   for (let gx = 50; gx < w; gx += 50) {
@@ -884,7 +888,7 @@ function renderOpening(room, op, px, py) {
     <g>
       <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="var(--panel)" stroke="${color}" stroke-width="2" />
       ${arc}
-      <text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="10" fill="${color}">${op.label || (op.kind === "door" ? "باب" : "شباك")}</text>
+      <text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="10" fill="${color}">${esc(op.label || (op.kind === "door" ? "باب" : "شباك"))}</text>
     </g>`;
 }
 
@@ -925,17 +929,17 @@ function renderFurniture(inst, collisionSet) {
   // For custom items: render the uploaded image directly inside the body, plus
   // a subtle colored stroke. For built-ins: filled rect with the library color.
   const body = isCustom
-    ? `<image class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" href="${item.image}" opacity="${opacity}"></image>
-       <rect class="fur-frame" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="none" stroke="${item.sideColor || item.color || '#555'}" stroke-width="2" rx="4" />`
-    : `<rect class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="${item.color}" opacity="${opacity}" rx="4" />`;
+    ? `<image class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" href="${esc(item.image)}" opacity="${opacity}"></image>
+       <rect class="fur-frame" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="none" stroke="${safeColor(item.sideColor || item.color, '#555')}" stroke-width="2" rx="4" />`
+    : `<rect class="fur-body" x="${-w/2}" y="${-h/2}" width="${w}" height="${h}" fill="${safeColor(item.color, '#bbb')}" opacity="${opacity}" rx="4" />`;
   const labelFill = isCustom ? "rgba(255,255,255,.95)" : "#fff";
   const labelStroke = isCustom ? "rgba(0,0,0,.55)" : "none";
   return `
-    <g class="${classes.join(" ")}" data-inst-id="${inst.instId}" transform="translate(${cx} ${cy}) rotate(${rot})">
+    <g class="${classes.join(" ")}" data-inst-id="${esc(inst.instId)}" transform="translate(${cx} ${cy}) rotate(${rot})">
       ${body}
       <g transform="rotate(${-rot})" style="pointer-events:none">
-        ${isCustom ? "" : `<text class="fur-icon" x="0" y="6" fill="${labelFill}">${item.icon || "📦"}</text>`}
-        <text class="fur-label" x="0" y="${Math.min(h, w)/2 - 6}" fill="${labelFill}" stroke="${labelStroke}" stroke-width=".5" paint-order="stroke">${item.name}</text>
+        ${isCustom ? "" : `<text class="fur-icon" x="0" y="6" fill="${labelFill}">${esc(item.icon || "📦")}</text>`}
+        <text class="fur-label" x="0" y="${Math.min(h, w)/2 - 6}" fill="${labelFill}" stroke="${labelStroke}" stroke-width=".5" paint-order="stroke">${esc(item.name)}</text>
       </g>
     </g>`;
 }
@@ -1145,6 +1149,22 @@ function svgPointInRoom(svg, clientX, clientY) {
 }
 function snap(v) { return Math.round(v / GRID_SNAP) * GRID_SNAP; }
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+// Escape user-controlled strings before inlining them into innerHTML / SVG
+// templates. Rooms, items, and layouts can be seeded from URL share payloads,
+// so we sanitize every string that reaches the DOM via innerHTML.
+function esc(s) {
+  if (s == null) return "";
+  const d = document.createElement("div");
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+// Validate a CSS color — allow only #rgb/#rrggbb hex to avoid CSS injection
+// via share URLs. Falls back to a neutral color when the input is invalid.
+function safeColor(c, fallback = "#888") {
+  if (typeof c !== "string") return fallback;
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c.trim()) ? c.trim() : fallback;
+}
 
 // ---------- Furniture interactions: move/select ----------
 function setupFurnitureInteractions(svg, room) {
@@ -1381,9 +1401,9 @@ function renderSelection() {
   const curPrice = priceFor(inst);
   const priceReadOnly = item.price != null;  // custom items carry price; don't edit here
   panel.innerHTML = `
-    <div class="sel-row"><span>الاسم</span><b>${item.icon || "📦"} ${item.name}</b></div>
-    <div class="sel-row"><span>الأبعاد</span><b>${item.w}×${item.h} سم</b></div>
-    <div class="sel-row"><span>الموقع</span><b>X: ${inst.x} , Y: ${inst.y}</b></div>
+    <div class="sel-row"><span>الاسم</span><b>${esc(item.icon || "📦")} ${esc(item.name)}</b></div>
+    <div class="sel-row"><span>الأبعاد</span><b>${Number(item.w) || 0}×${Number(item.h) || 0} سم</b></div>
+    <div class="sel-row"><span>الموقع</span><b>X: ${Number(inst.x) || 0} , Y: ${Number(inst.y) || 0}</b></div>
     <div class="sel-row">
       <span>الدوران</span>
       <input class="rot-input" type="number" min="0" max="359" step="15" value="${inst.rotation || 0}" aria-label="زاوية الدوران" />
@@ -1498,9 +1518,12 @@ function bindGlobalKeys() {
       if (k === "v") { e.preventDefault(); pasteClipboard(); return; }
       if (k === "a") { e.preventDefault(); selectAll(); return; }
     }
-    // Escape: clear selection / close modals
+    // Escape: clear selection / close modals. Skip drawRoom rebuild in 3D/walk
+    // modes so Three.js controls (OrbitControls, PointerLockControls) can
+    // handle Escape without destroying the scene.
     if (e.key === "Escape") {
       closeAllModals();
+      if (state.viewMode === "walk" || state.viewMode === "3d") return;
       state.selectedInstId = null;
       state.selectedInstIds.clear();
       state.measure = { active: false, p1: null, p2: null };
@@ -1783,9 +1806,9 @@ function renderNamedLayoutsList() {
     return;
   }
   host.innerHTML = arr.map(l => `
-    <div class="layout-row" data-id="${l.id}">
+    <div class="layout-row" data-id="${esc(l.id)}">
       <div class="layout-info">
-        <b>${l.name}</b>
+        <b>${esc(l.name)}</b>
         <span class="muted">${l.items.length} قطعة · ${new Date(l.savedAt).toLocaleDateString("ar-EG")}</span>
       </div>
       <div>

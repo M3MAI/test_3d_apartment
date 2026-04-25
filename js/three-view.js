@@ -46,6 +46,11 @@ function disposeObj(obj) {
 
 function hide() {
   hideApartment();
+  hideRoomOnly();
+}
+
+// Tears down only the room-level 3D context (leaves apartment walkthrough intact).
+function hideRoomOnly() {
   if (!ctx) return;
   if (ctx.resizeObs) ctx.resizeObs.disconnect();
   if (ctx.raf) cancelAnimationFrame(ctx.raf);
@@ -92,7 +97,7 @@ function show(container, opts) {
     1,
     8000
   );
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
@@ -700,7 +705,7 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
     Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1),
     1, 8000
   );
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
@@ -964,7 +969,7 @@ function setSunHour(hour) {
 }
 
 window.AptThreeView = {
-  show, hide, updateItems, setSelection, isActiveFor, screenToRoomCoords,
+  show, hide, hideRoomOnly, updateItems, setSelection, isActiveFor, screenToRoomCoords,
   showApartment, isActiveApartment, updateApartmentItems, hideApartment,
   screenshotPNG, exportGLB, setSunHour,
 };
