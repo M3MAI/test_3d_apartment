@@ -768,6 +768,16 @@ function renderOverviewRoom(room, bounds, pad) {
   const items = state.layouts[room.id] || [];
   const parts = [];
   parts.push(`<rect x="${x}" y="${y}" width="${room.width}" height="${room.depth}" fill="${safeColor(room.wallColor, "#f3eee4")}" stroke="${safeColor(room.color, "#888")}" stroke-width="${WALL_THICKNESS}" rx="2" />`);
+  // Accent wall stripe (mirror of the single-room view — feature wall only)
+  if (room.accentColor && room.accentColor !== room.wallColor) {
+    const stripe = 10;
+    const ac = safeColor(room.accentColor, "#8a1f3c");
+    const aw = room.accentWall || "top";
+    if (aw === "top")    parts.push(`<rect x="${x}" y="${y}" width="${room.width}" height="${stripe}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "bottom") parts.push(`<rect x="${x}" y="${y + room.depth - stripe}" width="${room.width}" height="${stripe}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "left")   parts.push(`<rect x="${x}" y="${y}" width="${stripe}" height="${room.depth}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "right")  parts.push(`<rect x="${x + room.width - stripe}" y="${y}" width="${stripe}" height="${room.depth}" fill="${ac}" opacity="0.85" />`);
+  }
   // Openings
   (room.openings || []).forEach(op => {
     const t = WALL_THICKNESS;
@@ -849,6 +859,18 @@ function renderRoomShell(room) {
   const parts = [];
 
   parts.push(`<rect x="${px}" y="${py}" width="${w}" height="${h}" fill="${safeColor(room.wallColor, "#f3eee4")}" stroke="${safeColor(room.color, "#888")}" stroke-width="${WALL_THICKNESS}" />`);
+
+  // Accent wall stripe — shows where the feature-wall color lives in real life
+  // (e.g. the teal wall in the blue bedroom, the burgundy wall in the master).
+  if (room.accentColor && room.accentColor !== room.wallColor) {
+    const stripe = 14;
+    const ac = safeColor(room.accentColor, "#8a1f3c");
+    const aw = room.accentWall || "top";
+    if (aw === "top")    parts.push(`<rect x="${px}" y="${py}" width="${w}" height="${stripe}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "bottom") parts.push(`<rect x="${px}" y="${py + h - stripe}" width="${w}" height="${stripe}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "left")   parts.push(`<rect x="${px}" y="${py}" width="${stripe}" height="${h}" fill="${ac}" opacity="0.85" />`);
+    if (aw === "right")  parts.push(`<rect x="${px + w - stripe}" y="${py}" width="${stripe}" height="${h}" fill="${ac}" opacity="0.85" />`);
+  }
 
   let grid = "";
   for (let gx = 50; gx < w; gx += 50) {

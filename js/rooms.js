@@ -10,8 +10,12 @@ const ROOMS = [
   {
     id: "salon",
     name: "الصالون (Reception)",
-    color: "#7ba8d4",
-    wallColor: "#c6d6ea",
+    // Video-accurate: all four walls are a soft powder / dusty blue (frames 8-11).
+    // `color` = the swatch shown in the room picker + 2D stage fill. `wallColor`
+    // = ambient wall tone used in 3D walls. `accentColor` = optional feature wall.
+    color: "#b7ccde",
+    wallColor: "#b7ccde",
+    floorColor: "#e6ddcf",
     description: "الغرفة الفاخرة بسقف معلق وإضاءة LED مدفونة. تستخدم لاستقبال الضيوف.",
     plan: { x: 0, y: 0 },
     width: 500,
@@ -26,8 +30,10 @@ const ROOMS = [
   {
     id: "living",
     name: "الصالة المعيشة",
-    color: "#e4d5b7",
-    wallColor: "#f0e3c9",
+    // Not distinctly colored in the video — plain cream/off-white, like the hallway.
+    color: "#ede4d4",
+    wallColor: "#ede4d4",
+    floorColor: "#e6ddcf",
     description: "غرفة المعيشة اليومية والتلفزيون.",
     plan: { x: 510, y: 0 },
     width: 450,
@@ -41,9 +47,15 @@ const ROOMS = [
   {
     id: "bedroom_blue",
     name: "غرفة نوم زرقاء",
-    color: "#2a6fa6",
-    wallColor: "#c8dbea",
-    description: "غرفة نوم بحائط أزرق بترولي مميز.",
+    // Video-accurate: deep teal-blue ACCENT wall (frame 14 right crop #06365a),
+    // three other walls are plain white. Use the accent for the room swatch so
+    // it's easy to recognise, and a white for the ambient wallColor.
+    color: "#1f5b82",
+    wallColor: "#f2f2f2",
+    accentColor: "#1f5b82",
+    accentWall: "top",
+    floorColor: "#e6ddcf",
+    description: "غرفة نوم بحائط أزرق بترولي مميز على واحد من الجدران والباقي أبيض.",
     plan: { x: 460, y: 570 },
     width: 400,
     depth: 350,
@@ -56,9 +68,11 @@ const ROOMS = [
   {
     id: "bedroom_teal",
     name: "غرفة أطفال (تركواز)",
-    color: "#4aa5a0",
-    wallColor: "#d2e9e6",
-    description: "غرفة أصغر مناسبة للأطفال بلون تركواز.",
+    // Video-accurate: sage / dusty-green walls (frame 30). Softer than true teal.
+    color: "#8fa88a",
+    wallColor: "#d6e0d4",
+    floorColor: "#e6ddcf",
+    description: "غرفة أصغر مناسبة للأطفال بلون بساجي/تركواز فاتح.",
     plan: { x: 870, y: 620 },
     width: 350,
     depth: 300,
@@ -71,9 +85,14 @@ const ROOMS = [
   {
     id: "bedroom_master",
     name: "غرفة ماستر (عنابي)",
-    color: "#8a1f3c",
-    wallColor: "#e8cad3",
-    description: "غرفة نوم رئيسية بحائط عنابي قوي.",
+    // Video-accurate: deep BURGUNDY/MAROON accent wall (frame 29 #72062a),
+    // rest of the room is plain white.
+    color: "#6e1d36",
+    wallColor: "#f2f2f2",
+    accentColor: "#6e1d36",
+    accentWall: "top",
+    floorColor: "#d9a0a8",
+    description: "غرفة نوم رئيسية بحائط عنابي قوي على حائط واحد والباقي أبيض، وأرضية سجاد عنابي.",
     plan: { x: 0, y: 570 },
     width: 450,
     depth: 350,
@@ -86,9 +105,14 @@ const ROOMS = [
   {
     id: "kitchen",
     name: "المطبخ",
-    color: "#d8b38a",
-    wallColor: "#f2e3ce",
-    description: "المطبخ — سيراميك كريمي وشباك خلفي.",
+    // Video-accurate: cream/beige sandstone walls with a dark-olive-green
+    // dado tile strip at the bottom (frame 7).
+    color: "#d6b891",
+    wallColor: "#e8d6bc",
+    accentColor: "#4d7e5e",
+    accentWall: "bottom",
+    floorColor: "#ece3d2",
+    description: "المطبخ — سيراميك كريمي وشريط بلاط أخضر زيتي أسفل الحائط.",
     plan: { x: 970, y: 0 },
     width: 300,
     depth: 250,
@@ -101,9 +125,14 @@ const ROOMS = [
   {
     id: "bathroom_main",
     name: "الحمام الرئيسي",
-    color: "#6fa8a4",
-    wallColor: "#dfece9",
-    description: "حمام كامل بالبانيو — بلاط أخضر مميز.",
+    // Video-accurate: pale gray-blue walls (frame 31) with a GREEN feature
+    // tile band around the bathtub / sink wall (frame 7 dado).
+    color: "#4d7e5e",
+    wallColor: "#dfe4e6",
+    accentColor: "#4d7e5e",
+    accentWall: "left",
+    floorColor: "#ebecee",
+    description: "حمام كامل بالبانيو — جدران رمادية-زرقاء فاتحة وبلاط أخضر مميز حول البانيو.",
     plan: { x: 510, y: 360 },
     width: 250,
     depth: 200,
@@ -116,9 +145,11 @@ const ROOMS = [
   {
     id: "wc",
     name: "توالت صغير",
-    color: "#c0c4cf",
-    wallColor: "#e8ebf2",
-    description: "توالت خدمي صغير.",
+    // Video-accurate: plain white/very-light-gray tiled walls (frames 34-35).
+    color: "#d8dbe0",
+    wallColor: "#eff1f5",
+    floorColor: "#ebecee",
+    description: "توالت خدمي صغير ببلاط أبيض.",
     plan: { x: 800, y: 360 },
     width: 150,
     depth: 150,

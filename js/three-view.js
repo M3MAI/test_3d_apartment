@@ -119,9 +119,11 @@ function show(container, opts) {
   fill.position.set(-room.width * 0.3, WALL_HEIGHT * 1.5, -room.depth * 0.3);
   scene.add(fill);
 
-  // Floor (wallColor matches 2D view)
+  // Floor — use explicit floorColor if defined; otherwise a neutral tile color
+  // so the wall color stays distinct from the floor (the old code used
+  // wallColor for both, which made the floor blend into the walls).
   const floorMat = new THREE.MeshStandardMaterial({
-    color: hexToInt(room.wallColor), roughness: 0.95,
+    color: hexToInt(room.floorColor || "#e6ddcf"), roughness: 0.95,
   });
   const floorGeo = new THREE.PlaneGeometry(room.width, room.depth);
   const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -563,12 +565,24 @@ function buildWalls(scene, room) {
     { length: room.depth, anchor: [0, 0, 0],                    axis: "z", wall: "left" },
     { length: room.depth, anchor: [room.width - t, 0, 0],       axis: "z", wall: "right" },
   ];
-  const wallColor = lighter(hexToInt(room.wallColor || "#cccccc"), 0.92);
-  const mat = new THREE.MeshStandardMaterial({
+  // Use the wallColor directly (slight lighten for nicer indoor feel) and fall
+  // back to off-white if missing. `accentColor` — when defined and different
+  // from wallColor — recolors ONE wall (the `accentWall` or first wall) to
+  // mirror the apartment's real accent wall shown in the video.
+  const wallColor = lighter(hexToInt(room.wallColor || "#eeeeee"), 0.15);
+  const accentHex = room.accentColor && room.accentColor !== room.wallColor
+    ? lighter(hexToInt(room.accentColor), 0.0)
+    : null;
+  const accentWall = room.accentWall || "top";
+  const baseMat = new THREE.MeshStandardMaterial({
     color: wallColor, roughness: 0.9, side: THREE.DoubleSide,
   });
+  const accentMat = accentHex !== null
+    ? new THREE.MeshStandardMaterial({ color: accentHex, roughness: 0.9, side: THREE.DoubleSide })
+    : null;
 
   walls.forEach(w => {
+    const mat = (accentMat && w.wall === accentWall) ? accentMat : baseMat;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);
     shape.lineTo(w.length, 0);
@@ -612,6 +626,13 @@ function lighter(colorInt, amount) {
   const g = Math.round(((colorInt >> 8)  & 0xff) + (255 - ((colorInt >> 8)  & 0xff)) * amount);
   const b = Math.round(( colorInt        & 0xff) + (255 - ( colorInt        & 0xff)) * amount);
   return (r << 16) | (g << 8) | b;
+}
+
+// Same as lighter() but accepts/returns a hex string so callers that still use
+// string colors (e.g. the floor fallback) don't need to convert back and forth.
+function lighterHex(hexStr, amount) {
+  const n = lighter(hexToInt(hexStr || "#888888"), amount);
+  return "#" + n.toString(16).padStart(6, "0");
 }
 
 // ---------- Furniture mesh ----------
@@ -864,10 +885,18 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     { length: room.depth, anchor: [offX, 0, offZ],                          axis: "z", wall: "left" },
     { length: room.depth, anchor: [offX + room.width - t, 0, offZ],         axis: "z", wall: "right" },
   ];
-  const wallColor = lighter(hexToInt(room.wallColor || "#cccccc"), 0.9);
-  const mat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9, side: THREE.DoubleSide });
+  const wallColor = lighter(hexToInt(room.wallColor || "#eeeeee"), 0.15);
+  const accentHex = room.accentColor && room.accentColor !== room.wallColor
+    ? hexToInt(room.accentColor)
+    : null;
+  const accentWall = room.accentWall || "top";
+  const baseMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9, side: THREE.DoubleSide });
+  const accentMat = accentHex !== null
+    ? new THREE.MeshStandardMaterial({ color: accentHex, roughness: 0.9, side: THREE.DoubleSide })
+    : null;
 
   walls.forEach(w => {
+    const mat = (accentMat && w.wall === accentWall) ? accentMat : baseMat;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);
     shape.lineTo(w.length, 0);
@@ -903,8 +932,12 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     if (collidables) collidables.push(mesh);
   });
 
-  // Floor tile for this room (colored by wallColor so you can see room boundaries)
-  const fMat = new THREE.MeshStandardMaterial({ color: hexToInt(room.wallColor), roughness: 0.95 });
+  // Floor tile for this room — uses floorColor if defined, otherwise a tinted
+  // mix of wallColor so room boundaries stay readable in the plan overview.
+  const fMat = new THREE.MeshStandardMaterial({
+    color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
+    roughness: 0.95,
+  });
   const fGeo = new THREE.PlaneGeometry(room.width, room.depth);
   const fMesh = new THREE.Mesh(fGeo, fMat);
   fMesh.rotation.x = -Math.PI / 2;
