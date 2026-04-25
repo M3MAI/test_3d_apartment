@@ -1035,7 +1035,7 @@ function bindCatalogTouchDrag() {
     if (e.touches.length !== 1) return;
     const item = e.target.closest(".cat-item");
     if (!item) return;
-    if (e.target.closest(".cat-del")) return;
+    if (e.target.closest(".cat-del") || e.target.closest(".cat-edit")) return;
     const t = e.touches[0];
     active = {
       el: item,
@@ -1766,8 +1766,8 @@ function addOpeningRow(op) {
       <option value="left"   ${op.wall === "left"   ? "selected" : ""}>غرب</option>
       <option value="right"  ${op.wall === "right"  ? "selected" : ""}>شرق</option>
     </select>
-    <label>موضع <input type="number" data-k="at"   min="0" step="5" value="${op.at}" /></label>
-    <label>عرض  <input type="number" data-k="size" min="30" step="5" value="${op.size}" /></label>
+    <label>موضع <input type="number" data-k="at"   min="0" step="5" value="${Number(op.at) || 0}" /></label>
+    <label>عرض  <input type="number" data-k="size" min="30" step="5" value="${Number(op.size) || 80}" /></label>
     <button class="btn sm danger" data-k="del">✕</button>
   `;
   row.querySelector('[data-k="del"]').addEventListener("click", () => row.remove());
