@@ -491,7 +491,7 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 #btn-measure.active { background: #ffdd57; color: #3b2d00; }
 
 /* ---------- Room editor / shortcuts / layouts modals ---------- */
-.fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
+#room-modal .fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
 .field-label { margin: 12px 0 6px 0; font-size: 14px; font-weight: 600; }
 .openings-list { display: flex; flex-direction: column; gap: 6px; }
 .opening-row {
@@ -662,7 +662,7 @@ kbd {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.fields-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+#custom-modal .fields-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .field-image .image-preview {
   margin-top: 6px;
   height: 140px;

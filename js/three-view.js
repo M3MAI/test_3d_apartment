@@ -305,7 +305,7 @@ function applyCollisionTint(ctx, collisionSet) {
     mats.forEach(m => {
       if (!m) return;
       if (collides) {
-        if (!m.userData._origEmissive) {
+        if (m.userData._origEmissive === undefined) {
           m.userData._origEmissive = (m.emissive && m.emissive.getHex) ? m.emissive.getHex() : 0x000000;
           m.userData._origEmissiveIntensity = m.emissiveIntensity ?? 1;
         }

@@ -303,7 +303,8 @@ function renderCatalog() {
       container.appendChild(div);
     });
   });
-  if (!container.children.length) {
+  // Count only actual catalog items (chips row is always present).
+  if (!container.querySelector(".cat-item")) {
     const msg = document.createElement("div");
     msg.className = "cat-group";
     msg.textContent = "لا توجد نتائج";
@@ -543,6 +544,7 @@ function drawRoom() {
 
   // First-person walkthrough — whole apartment in 3D with WASD.
   if (state.viewMode === "walk") {
+    if (window.AptThreeView) window.AptThreeView.hide();
     drawWalkthrough(container);
     return;
   }
