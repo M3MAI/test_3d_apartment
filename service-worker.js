@@ -1,5 +1,5 @@
 // Minimal offline-first service worker (cache-on-install + stale-while-revalidate).
-const CACHE = "apt-v1";
+const CACHE = "apt-v2";
 const ASSETS = [
   "./",
   "./index.html",

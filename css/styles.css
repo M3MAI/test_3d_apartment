@@ -541,15 +541,26 @@ kbd {
   position: fixed; inset: 0; background: rgba(10,14,30,0.6);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
+  padding: 16px;
 }
+.onboarding[hidden] { display: none !important; }
 .onboarding .ob-card {
   background: var(--surface); color: var(--text);
   padding: 24px 28px; border-radius: 14px; max-width: 480px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  max-height: 90vh; overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 .onboarding h3 { margin-top: 0; }
 .onboarding ul { padding-inline-start: 20px; line-height: 1.8; }
-.onboarding button { margin-top: 12px; }
+.onboarding button { margin-top: 12px; min-height: 44px; padding: 10px 20px; font-size: 15px; }
+
+/* Global safety — the native [hidden] rule is low-specificity and loses to
+   class selectors that set `display`. Keep this last-resort rule so any
+   element with the `hidden` attribute truly stays hidden regardless of
+   other display rules (same pattern we use for .modal-backdrop[hidden]). */
+[hidden] { display: none !important; }
 
 /* ---------- Measure overlay ---------- */
 .measure-hint {

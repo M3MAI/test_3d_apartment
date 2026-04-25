@@ -1965,9 +1965,14 @@ function bindOnboarding() {
   if (!localStorage.getItem(ONBOARDED_KEY)) ob.hidden = false;
   const dismiss = () => {
     ob.hidden = true;
-    localStorage.setItem(ONBOARDED_KEY, "1");
+    ob.style.display = "none";
+    try { localStorage.setItem(ONBOARDED_KEY, "1"); } catch (_) {}
   };
-  document.getElementById("ob-dismiss").addEventListener("click", dismiss);
+  const btn = document.getElementById("ob-dismiss");
+  if (btn) {
+    btn.addEventListener("click", dismiss);
+    btn.addEventListener("touchend", e => { e.preventDefault(); dismiss(); }, { passive: false });
+  }
   ob.addEventListener("click", e => { if (e.target === ob) dismiss(); });
 }
 
