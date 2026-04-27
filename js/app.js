@@ -7,6 +7,7 @@ const THEME_KEY       = "apt_theme";
 const ROOM_OVERRIDES_KEY = "apt_room_overrides_v1";
 const NAMED_LAYOUTS_KEY  = "apt_named_layouts_v1";
 const PRICES_KEY         = "apt_prices_v1";        // { "groupId:itemId": number }
+const UNIT_KEY           = "apt_unit";              // "cm" | "m" | "ft"
 const ONBOARDED_KEY      = "apt_onboarded_v1";
 const WALL_THICKNESS  = 10;      // cm, visual thickness of walls in plan
 const SVG_PADDING     = 40;      // svg viewport padding around the room
@@ -33,7 +34,48 @@ const state = {
   clipboard: null,               // { inst clone data } for Ctrl+C / Ctrl+V
   prices: loadPrices(),
   sunHour: 13,
+  unit: (localStorage.getItem(UNIT_KEY) || "m"),  // "cm" | "m" | "ft"
 };
+
+// Convert cm → current unit string. `precise=false` returns short forms suited
+// for the header (e.g. "5.00 م"), `precise=true` returns 1-decimal cm/inch
+// suitable for the selection panel.
+function fmtCm(cmVal, opts = {}) {
+  const v = Number(cmVal) || 0;
+  const u = state.unit || "m";
+  if (u === "cm") return `${Math.round(v)} سم`;
+  if (u === "ft") {
+    const inch = v / 2.54;
+    const ft = Math.floor(inch / 12);
+    const inchRem = Math.round(inch - ft * 12);
+    if (opts.compact) return `${(v / 30.48).toFixed(2)} ft`;
+    return `${ft}'${inchRem}"`;
+  }
+  // default: meters
+  return `${(v / 100).toFixed(2)} م`;
+}
+function fmtPair(wCm, hCm) {
+  const u = state.unit || "m";
+  if (u === "cm") return `${Math.round(wCm)} × ${Math.round(hCm)} سم`;
+  if (u === "ft") return `${(wCm / 30.48).toFixed(2)} × ${(hCm / 30.48).toFixed(2)} ft`;
+  return `${(wCm / 100).toFixed(2)} × ${(hCm / 100).toFixed(2)} م`;
+}
+function cycleUnit() {
+  const order = ["m", "cm", "ft"];
+  state.unit = order[(order.indexOf(state.unit) + 1) % order.length];
+  try { localStorage.setItem(UNIT_KEY, state.unit); } catch {}
+  updateUnitButton();
+  drawRoom();
+  renderSelection();
+  renderCatalog();
+}
+function updateUnitButton() {
+  const btn = document.getElementById("btn-unit");
+  if (!btn) return;
+  const labels = { m: "م", cm: "سم", ft: "ft" };
+  btn.textContent = labels[state.unit] || "م";
+  btn.title = `الوحدة: ${labels[state.unit]} — اضغط للتبديل`;
+}
 
 function loadPrices() {
   try { return JSON.parse(localStorage.getItem(PRICES_KEY) || "{}"); }
@@ -92,6 +134,14 @@ document.addEventListener("DOMContentLoaded", () => {
   maybeLoadStateFromUrl();
   renderRoomList();
   renderCatalog();
+  // Hydrate CustomItems from IndexedDB (or migrate from legacy localStorage)
+  // and re-render the catalog once the heavy image data is available.
+  if (window.CustomItems && typeof window.CustomItems.init === "function") {
+    window.CustomItems.init().then(() => {
+      renderCatalog();
+      drawRoom();
+    });
+  }
   bindTopbar();
   bindCatalogSearch();
   bindViewControls();
@@ -226,10 +276,24 @@ function markActiveRoom() {
 }
 
 // ---------- Sidebar: catalog ----------
+// Normalize Arabic text for search: strip diacritics, unify alef/yaa/taa-marbuta.
+function normalizeAr(s) {
+  if (!s) return "";
+  return String(s).toLowerCase()
+    .replace(/[\u064B-\u0652\u0670]/g, "")  // remove tashkeel + alef khanjariya
+    .replace(/[\u0622\u0623\u0625]/g, "\u0627") // آ أ إ → ا
+    .replace(/\u0629/g, "\u0647")             // ة → ه
+    .replace(/\u0649/g, "\u064A")             // ى → ي
+    .replace(/\u0624/g, "\u0648")             // ؤ → و
+    .replace(/\u0626/g, "\u064A")             // ئ → ي
+    .replace(/[\u0640]/g, "")                 // tatweel
+    .trim();
+}
+
 function renderCatalog() {
   const container = document.getElementById("furniture-catalog");
   container.innerHTML = "";
-  const q = state.catalogQuery.trim().toLowerCase();
+  const q = normalizeAr(state.catalogQuery.trim().toLowerCase());
   const cat = state.catalogCategory || "all";
 
   // Category chips row
@@ -252,7 +316,9 @@ function renderCatalog() {
   groups.forEach(group => {
     if (cat !== "all" && cat !== group.id) return;
     const matchingItems = group.items.filter(item =>
-      !q || item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+      !q
+        || normalizeAr(item.name.toLowerCase()).includes(q)
+        || item.id.toLowerCase().includes(q)
     );
     if (!matchingItems.length) return;
     const header = document.createElement("div");
@@ -285,10 +351,11 @@ function renderCatalog() {
           e.stopPropagation();
           e.preventDefault();
           if (!confirm(`حذف "${item.name}" من الكتالوج؟ (لن يُحذف من الغرف المحفوظة)`)) return;
-          window.CustomItems.remove(item.id);
-          renderCatalog();
-          drawRoom();
-          toast("تم حذف العنصر", "warn");
+          window.CustomItems.remove(item.id).then(() => {
+            renderCatalog();
+            drawRoom();
+            toast("تم حذف العنصر", "warn");
+          });
         });
         div.querySelector(".cat-edit").addEventListener("click", e => {
           e.stopPropagation();
@@ -388,7 +455,7 @@ function bindCustomModal() {
     }
   });
 
-  saveBtn.addEventListener("click", () => {
+  saveBtn.addEventListener("click", async () => {
     const name = document.getElementById("ci-name").value.trim();
     const w = parseInt(document.getElementById("ci-w").value, 10);
     const d = parseInt(document.getElementById("ci-d").value, 10);
@@ -402,7 +469,7 @@ function bindCustomModal() {
     if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
 
     if (editingId) {
-      const ok = window.CustomItems.update(editingId, {
+      const ok = await window.CustomItems.update(editingId, {
         name, w, h: d, depth: h, category: cat, price,
         color: processed.sideColor, sideColor: processed.sideColor, image: processed.image,
       });
@@ -423,7 +490,7 @@ function bindCustomModal() {
         category: cat,
         price,
       };
-      if (window.CustomItems.add(item)) {
+      if (await window.CustomItems.add(item)) {
         renderCatalog();
         toast("تمت الإضافة للكتالوج");
         close();
@@ -482,6 +549,11 @@ function bindTopbar() {
   document.getElementById("btn-redo").addEventListener("click", redo);
   document.getElementById("btn-theme").addEventListener("click", toggleTheme);
   document.getElementById("btn-print").addEventListener("click", openPdfReport);
+  const unitBtn = document.getElementById("btn-unit");
+  if (unitBtn) {
+    unitBtn.addEventListener("click", cycleUnit);
+    updateUnitButton();
+  }
 }
 
 function exportJSON() {
@@ -566,7 +638,7 @@ function drawRoom() {
   }
 
   document.getElementById("room-title").textContent = room.name;
-  document.getElementById("room-dims").textContent = `${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م`;
+  document.getElementById("room-dims").textContent = fmtPair(room.width, room.depth);
 
   const items = state.layouts[room.id] || [];
   document.getElementById("item-count").textContent = `${items.length} قطعة`;
@@ -666,7 +738,7 @@ function renderMeasureOverlay(room) {
     <line class="measure-line" x1="${ox + p1.x}" y1="${oy + p1.y}" x2="${ox + p2.x}" y2="${oy + p2.y}" />
     <circle class="measure-dot" cx="${ox + p1.x}" cy="${oy + p1.y}" r="6" />
     <circle class="measure-dot" cx="${ox + p2.x}" cy="${oy + p2.y}" r="6" />
-    <text class="measure-label" x="${mx}" y="${my - 10}" text-anchor="middle">${(dist/100).toFixed(2)} م</text>
+    <text class="measure-label" x="${mx}" y="${my - 10}" text-anchor="middle">${fmtCm(dist)}</text>
   `;
 }
 function setupMeasureClicks(svg, room) {
@@ -729,7 +801,7 @@ function apartmentBounds() {
 function drawOverview(container) {
   document.getElementById("room-title").textContent = "مخطط الشقة الكامل";
   const bounds = apartmentBounds();
-  document.getElementById("room-dims").textContent = `${(bounds.w/100).toFixed(2)} × ${(bounds.h/100).toFixed(2)} م`;
+  document.getElementById("room-dims").textContent = fmtPair(bounds.w, bounds.h);
   const totalItems = ROOMS.reduce((s, r) => s + (state.layouts[r.id] || []).length, 0);
   document.getElementById("item-count").textContent = `${totalItems} قطعة (${ROOMS.length} غرف)`;
   // Cross-room collisions are not meaningful; clear the indicator.
@@ -816,7 +888,7 @@ function renderOverviewRoom(room, bounds, pad) {
   });
   // Room label
   parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 6}" text-anchor="middle" font-size="24" font-weight="700" fill="var(--muted)" style="pointer-events:none">${esc(room.name)}</text>`);
-  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 32}" text-anchor="middle" font-size="16" fill="var(--muted)" opacity="0.7" style="pointer-events:none">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م — ${items.length} قطعة</text>`);
+  parts.push(`<text x="${x + room.width/2}" y="${y + room.depth/2 + 32}" text-anchor="middle" font-size="16" fill="var(--muted)" opacity="0.7" style="pointer-events:none">${fmtPair(room.width, room.depth)} — ${items.length} قطعة</text>`);
   // Hit target for clicking into the room
   return `<g class="plan-room" data-plan-room="${esc(room.id)}" style="cursor:pointer">
     ${parts.join("")}
@@ -827,7 +899,7 @@ function renderOverviewRoom(room, bounds, pad) {
 function drawWalkthrough(container) {
   document.getElementById("room-title").textContent = "جولة داخل الشقة";
   const bounds = apartmentBounds();
-  document.getElementById("room-dims").textContent = `${(bounds.w/100).toFixed(2)} × ${(bounds.h/100).toFixed(2)} م`;
+  document.getElementById("room-dims").textContent = fmtPair(bounds.w, bounds.h);
   const totalItems = ROOMS.reduce((s, r) => s + (state.layouts[r.id] || []).length, 0);
   document.getElementById("item-count").textContent = `${totalItems} قطعة`;
   setCollisionIndicator(0);
@@ -891,8 +963,8 @@ function renderRoomShell(room) {
 
   (room.openings || []).forEach(op => parts.push(renderOpening(room, op, px, py)));
 
-  parts.push(`<text x="${px + w/2}" y="${py - 12}" text-anchor="middle" fill="var(--muted)" font-size="14">${(w/100).toFixed(2)} م</text>`);
-  parts.push(`<text x="${px - 20}" y="${py + h/2}" text-anchor="middle" fill="var(--muted)" font-size="14" transform="rotate(-90 ${px - 20} ${py + h/2})">${(h/100).toFixed(2)} م</text>`);
+  parts.push(`<text x="${px + w/2}" y="${py - 12}" text-anchor="middle" fill="var(--muted)" font-size="14">${fmtCm(w)}</text>`);
+  parts.push(`<text x="${px - 20}" y="${py + h/2}" text-anchor="middle" fill="var(--muted)" font-size="14" transform="rotate(-90 ${px - 20} ${py + h/2})">${fmtCm(h)}</text>`);
 
   parts.push(`<g transform="translate(${px + w - 30} ${py + 30})">
     <circle r="16" fill="var(--panel)" stroke="var(--muted)" />
@@ -1601,8 +1673,8 @@ function renderSelection() {
   const priceReadOnly = item.price != null;  // custom items carry price; don't edit here
   panel.innerHTML = `
     <div class="sel-row"><span>الاسم</span><b>${esc(item.icon || "📦")} ${esc(item.name)}</b></div>
-    <div class="sel-row"><span>الأبعاد</span><b>${Number(item.w) || 0}×${Number(item.h) || 0} سم</b></div>
-    <div class="sel-row"><span>الموقع</span><b>X: ${Number(inst.x) || 0} , Y: ${Number(inst.y) || 0}</b></div>
+    <div class="sel-row"><span>الأبعاد</span><b>${fmtPair(Number(item.w) || 0, Number(item.h) || 0)}</b></div>
+    <div class="sel-row"><span>الموقع</span><b>X: ${fmtCm(Number(inst.x) || 0)} , Y: ${fmtCm(Number(inst.y) || 0)}</b></div>
     <div class="sel-row">
       <span>الدوران</span>
       <input class="rot-input" type="number" min="0" max="359" step="15" value="${inst.rotation || 0}" aria-label="زاوية الدوران" />
@@ -2318,7 +2390,7 @@ function openPdfReport() {
     if (!items.length) {
       return `<section class="room-block">
         <h2>${esc(room.name)}</h2>
-        <div class="meta">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م</div>
+        <div class="meta">${fmtPair(room.width, room.depth)}</div>
         <p class="empty">لا توجد قطع في هذه الغرفة.</p>
       </section>`;
     }
@@ -2332,7 +2404,7 @@ function openPdfReport() {
       </tr>`).join("");
     return `<section class="room-block">
       <h2>${esc(room.name)}</h2>
-      <div class="meta">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م
+      <div class="meta">${fmtPair(room.width, room.depth)}
         — ارتفاع السقف ${room.height || 270} سم — استخدام ${usedPct}%
         — إجمالي ${items.length} قطعة</div>
       <table>
