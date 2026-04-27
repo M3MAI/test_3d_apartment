@@ -187,10 +187,14 @@
       throw new Error("لم نجد جدراناً على الطبقة WALLS — تأكّد من رسم محيط الغرفة كـ LWPOLYLINE مغلق.");
     }
     const { bbox } = outline;
-    // Translate everything so the room's bottom-left becomes (0, 0).
-    const ox = bbox.minX, oy = bbox.minY;
+    // Translate and flip so the room's top-left (AutoCAD top-left = maxY-minX
+    // corner) becomes (0, 0). AutoCAD is Y-up; the room model is Y-down
+    // (SVG-style) where y=0 is the "top" wall — hence the flip below.
+    const ox = bbox.minX;
     const W = Math.max(50, Math.round(bbox.w * k));
     const D = Math.max(50, Math.round(bbox.h * k));
+    const toRoomX = (xDxf) => (xDxf - ox) * k;
+    const toRoomY = (yDxf) => (bbox.maxY - yDxf) * k;
 
     // Detect a name from the largest TEXT/MTEXT inside the bbox on ROOM_NAMES.
     let name = null;
@@ -212,10 +216,10 @@
                  : layer === "WINDOWS" ? "window"
                  : null;
       if (!kind) return;
-      const ax = (e.x1 - ox) * k;
-      const ay = (e.y1 - oy) * k;
-      const bx = (e.x2 - ox) * k;
-      const by = (e.y2 - oy) * k;
+      const ax = toRoomX(e.x1);
+      const ay = toRoomY(e.y1);
+      const bx = toRoomX(e.x2);
+      const by = toRoomY(e.y2);
       const cx = (ax + bx) / 2;
       const cy = (ay + by) / 2;
       const length = Math.hypot(bx - ax, by - ay);
