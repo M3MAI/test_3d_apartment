@@ -2028,6 +2028,37 @@ function bindRoomModal() {
   addDoorBtn.addEventListener("click", () => addOpeningRow({ wall: "top", at: 50, size: 90, kind: "door", label: "باب" }));
   addWinBtn.addEventListener("click",  () => addOpeningRow({ wall: "top", at: 50, size: 120, kind: "window", label: "شباك" }));
 
+  // AutoCAD DXF import — fills width/depth/openings/name from the selected
+  // DXF file. Applied in-place to the open modal; user can still tweak and
+  // press Save, or Cancel to discard.
+  const dxfInput = document.getElementById("re-import-dxf");
+  if (dxfInput) {
+    dxfInput.addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = ""; // allow re-selecting the same file next time
+      if (!file) return;
+      const err  = document.getElementById("re-error");
+      const note = document.getElementById("re-dxf-note");
+      err.hidden = true; note.hidden = true;
+      try {
+        const text = await file.text();
+        if (!window.DxfImport) throw new Error("مكتبة DXF غير مُحمَّلة");
+        const res = window.DxfImport.importRoomFromDxf(text);
+        document.getElementById("re-w").value = res.width;
+        document.getElementById("re-d").value = res.depth;
+        if (res.name) document.getElementById("re-name").value = res.name;
+        renderOpeningsList(res.openings.map(op => ({
+          ...op, label: op.kind === "door" ? "باب" : "شباك",
+        })));
+        note.textContent = `تم الاستيراد: ${res.width}×${res.depth} سم، ${res.openings.length} فتحة (الوحدة: ${res.stats.unitLabel}). راجِع ثم اضغط حفظ.`;
+        note.hidden = false;
+      } catch (ex) {
+        err.textContent = "فشل قراءة DXF: " + (ex && ex.message ? ex.message : "ملف غير صالح");
+        err.hidden = false;
+      }
+    });
+  }
+
   resetBtn.addEventListener("click", () => {
     if (!editingRoomId) return;
     if (!confirm("إرجاع الغرفة لأبعادها الافتراضية؟")) return;
