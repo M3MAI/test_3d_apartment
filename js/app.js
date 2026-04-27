@@ -481,7 +481,7 @@ function bindTopbar() {
   document.getElementById("btn-undo").addEventListener("click", undo);
   document.getElementById("btn-redo").addEventListener("click", redo);
   document.getElementById("btn-theme").addEventListener("click", toggleTheme);
-  document.getElementById("btn-print").addEventListener("click", () => window.print());
+  document.getElementById("btn-print").addEventListener("click", openPdfReport);
 }
 
 function exportJSON() {
@@ -951,7 +951,9 @@ function renderFurniture(inst, collisionSet, blockedSet) {
   const w = item.w;
   const h = item.h;
   const classes = ["furniture"];
-  if (inst.instId === state.selectedInstId) classes.push("selected");
+  const isSelected = inst.instId === state.selectedInstId
+    || (state.selectedInstIds && state.selectedInstIds.has(inst.instId));
+  if (isSelected) classes.push("selected");
   if (collisionSet && collisionSet.has(inst.instId)) classes.push("collides");
   if (blockedSet && blockedSet.has(inst.instId)) classes.push("blocks-door");
   const opacity = item.opacity ?? 1;
@@ -1274,20 +1276,51 @@ function setupFurnitureInteractions(svg, room) {
   svg.addEventListener("touchstart", onDown, { passive: false });
 
   function onDown(e) {
-    // ignore middle-button (reserved for pan) and shift-click (reserved for pan)
-    if (e.button === 1 || (e.shiftKey && e.button === 0)) return;
+    // Middle-button is reserved for pan.
+    if (e.button === 1) return;
     const g = e.target.closest(".furniture");
+    // Shift+click on empty canvas falls through to setupZoomPan (panning).
+    if (e.shiftKey && e.button === 0 && !g) return;
     if (!g) {
-      if (state.selectedInstId !== null) {
+      // Click on empty canvas clears single + multi selection.
+      if (state.selectedInstId !== null || state.selectedInstIds.size) {
         state.selectedInstId = null;
+        state.selectedInstIds.clear();
         drawRoom();
         renderSelection();
       }
       return;
     }
     const instId = g.dataset.instId;
+    // Shift+click on a furniture node toggles multi-selection without dragging.
+    if (e.shiftKey && e.button === 0) {
+      e.preventDefault();
+      if (state.selectedInstIds.has(instId)) {
+        state.selectedInstIds.delete(instId);
+        if (state.selectedInstId === instId) {
+          state.selectedInstId = state.selectedInstIds.size
+            ? [...state.selectedInstIds][state.selectedInstIds.size - 1]
+            : null;
+        }
+      } else {
+        // Carry the previously focused item into the set so the first
+        // shift+click after a normal click extends rather than replaces.
+        if (state.selectedInstId && !state.selectedInstIds.has(state.selectedInstId)) {
+          state.selectedInstIds.add(state.selectedInstId);
+        }
+        state.selectedInstIds.add(instId);
+        state.selectedInstId = instId;
+      }
+      drawRoom();
+      renderSelection();
+      return;
+    }
     const prevSelected = state.selectedInstId;
     state.selectedInstId = instId;
+    // Plain (non-shift) click on furniture clears the multi-selection unless
+    // the user clicked an item already in the set (then keep the set so they
+    // can drag the lead item without losing selection).
+    if (!state.selectedInstIds.has(instId)) state.selectedInstIds.clear();
     renderSelection();
     if (prevSelected !== instId) {
       document.querySelectorAll(".furniture.selected").forEach(n => n.classList.remove("selected"));
@@ -1301,6 +1334,15 @@ function setupFurnitureInteractions(svg, room) {
     const startX = inst.x, startY = inst.y;
     let moved = false;
     const preSnapshot = snapshot();
+
+    // Snapshot initial positions of all multi-selected items so we can move
+    // the whole group together when the dragged item is in the set.
+    const groupDrag = state.selectedInstIds && state.selectedInstIds.has(instId)
+      && state.selectedInstIds.size > 1;
+    const groupItems = groupDrag
+      ? state.layouts[room.id].filter(i => state.selectedInstIds.has(i.instId) && i.instId !== instId)
+        .map(o => ({ inst: o, sx: o.x, sy: o.y }))
+      : [];
 
     function onMove(ev) {
       ev.preventDefault();
@@ -1373,6 +1415,22 @@ function setupFurnitureInteractions(svg, room) {
 
       const g2 = svg.querySelector(`.furniture[data-inst-id="${instId}"]`);
       if (g2) g2.setAttribute("transform", `translate(${SVG_PADDING + inst.x} ${SVG_PADDING + inst.y}) rotate(${inst.rotation || 0})`);
+      // Apply same delta to other multi-selected items (no Alt-snap or guides).
+      if (groupItems.length) {
+        const realDx = inst.x - startX;
+        const realDy = inst.y - startY;
+        groupItems.forEach(({ inst: o, sx, sy }) => {
+          const oi = findItem(o.groupId, o.itemId);
+          if (!oi) return;
+          const or = (o.rotation || 0) % 180;
+          const ow = or === 90 ? oi.h : oi.w;
+          const oh = or === 90 ? oi.w : oi.h;
+          o.x = clamp(snap(sx + realDx), ow/2, room.width  - ow/2);
+          o.y = clamp(snap(sy + realDy), oh/2, room.depth  - oh/2);
+          const og = svg.querySelector(`.furniture[data-inst-id="${o.instId}"]`);
+          if (og) og.setAttribute("transform", `translate(${SVG_PADDING + o.x} ${SVG_PADDING + o.y}) rotate(${o.rotation || 0})`);
+        });
+      }
       drawAlignGuides(svg, guides, room);
     }
     function onUp() {
@@ -1408,10 +1466,13 @@ function setupZoomPan(svg, container) {
     zoomAt(svg, e.clientX, e.clientY, factor);
   }, { passive: false });
 
-  // Middle-mouse or Shift+drag pan
+  // Middle-mouse or Shift+drag pan.
+  // Shift+click on a furniture node is reserved for multi-select; only treat
+  // shift+drag on empty canvas as pan.
   let panning = null;
   svg.addEventListener("mousedown", e => {
-    const shouldPan = e.button === 1 || (e.button === 0 && e.shiftKey);
+    const onFurniture = e.target.closest(".furniture");
+    const shouldPan = e.button === 1 || (e.button === 0 && e.shiftKey && !onFurniture);
     if (!shouldPan) return;
     e.preventDefault();
     panning = { startX: e.clientX, startY: e.clientY, tx: state.view.tx, ty: state.view.ty };
@@ -1496,7 +1557,34 @@ function fitView() {
 // ---------- Selection details panel ----------
 function renderSelection() {
   const panel = document.getElementById("selection-info");
-  if (!state.selectedInstId || !state.activeRoomId) {
+  if (!state.activeRoomId) {
+    panel.className = "empty";
+    panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    return;
+  }
+  // Multi-selection summary panel
+  if (state.selectedInstIds && state.selectedInstIds.size > 1) {
+    panel.className = "";
+    const ids = [...state.selectedInstIds];
+    const items = (state.layouts[state.activeRoomId] || []).filter(i => ids.includes(i.instId));
+    const cost = items.reduce((s, i) => s + priceFor(i), 0);
+    panel.innerHTML = `
+      <div class="sel-row"><span>محدّد</span><b>${items.length} قطعة</b></div>
+      <div class="sel-row"><span>الإجمالي</span><b>${cost ? Number(cost).toLocaleString("ar-EG") + " ج.م" : "—"}</b></div>
+      <div class="sel-actions">
+        <button class="btn" data-multi-action="rotate"    title="دوران 90° للجميع">⟳ 90°</button>
+        <button class="btn" data-multi-action="duplicate" title="تكرار الجميع">📋 تكرار</button>
+        <button class="btn danger" data-multi-action="delete" title="حذف الجميع (Del)">✕ حذف</button>
+        <button class="btn ghost" data-multi-action="clear" title="إلغاء التحديد">إلغاء</button>
+      </div>
+      <small class="hint" style="display:block;margin-top:8px">Shift+Click على قطعة لإضافتها/إزالتها من التحديد</small>
+    `;
+    panel.querySelectorAll("[data-multi-action]").forEach(btn => {
+      btn.addEventListener("click", () => handleMultiAction(btn.dataset.multiAction));
+    });
+    return;
+  }
+  if (!state.selectedInstId) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
     return;
@@ -1581,6 +1669,45 @@ function fitWithinRoom(inst) {
   const effH = rot === 90 ? item.w : item.h;
   inst.x = clamp(inst.x, effW/2, room.width  - effW/2);
   inst.y = clamp(inst.y, effH/2, room.depth  - effH/2);
+}
+
+function handleMultiAction(action) {
+  const room = getRoom();
+  if (!room) return;
+  const items = state.layouts[room.id];
+  if (!items) return;
+  const ids = [...state.selectedInstIds];
+  if (!ids.length) return;
+  const targets = items.filter(i => ids.includes(i.instId));
+  if (!targets.length) return;
+  pushHistory();
+  if (action === "rotate") {
+    targets.forEach(t => { t.rotation = ((t.rotation || 0) + 90) % 360; fitWithinRoom(t); });
+  } else if (action === "duplicate") {
+    const newIds = [];
+    targets.forEach(t => {
+      const copy = { ...t, instId: "i_" + Math.random().toString(36).slice(2, 9), x: t.x + 30, y: t.y + 30 };
+      fitWithinRoom(copy);
+      items.push(copy);
+      newIds.push(copy.instId);
+    });
+    state.selectedInstIds = new Set(newIds);
+    state.selectedInstId = newIds[newIds.length - 1] || null;
+  } else if (action === "delete") {
+    const toDelete = new Set(ids);
+    state.layouts[room.id] = items.filter(i => !toDelete.has(i.instId));
+    state.selectedInstIds.clear();
+    state.selectedInstId = null;
+  } else if (action === "clear") {
+    state.selectedInstIds.clear();
+    if (state.selectedInstId && !ids.includes(state.selectedInstId)) {
+      // keep focused item
+    }
+  }
+  saveLayouts();
+  drawRoom();
+  renderSelection();
+  renderRoomList();
 }
 
 function handleSelAction(action, inst) {
@@ -1669,6 +1796,35 @@ function bindGlobalKeys() {
       drawRoom();
       renderSelection();
       return;
+    }
+
+    // Multi-selection shortcuts (>1 selected): operate on the whole set first.
+    const multi = state.selectedInstIds && state.selectedInstIds.size > 1;
+    if (multi) {
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); handleMultiAction("delete"); return; }
+      if (e.key === "r" || e.key === "R") { e.preventDefault(); handleMultiAction("rotate"); return; }
+      if (e.key === "d" || e.key === "D") { e.preventDefault(); handleMultiAction("duplicate"); return; }
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 25 : GRID_SNAP;
+        const room = getRoom();
+        if (!room) return;
+        const items = state.layouts[room.id] || [];
+        const ids = state.selectedInstIds;
+        const targets = items.filter(i => ids.has(i.instId));
+        pushHistory();
+        targets.forEach(inst => {
+          if (e.key === "ArrowLeft")  inst.x -= step;
+          if (e.key === "ArrowRight") inst.x += step;
+          if (e.key === "ArrowUp")    inst.y -= step;
+          if (e.key === "ArrowDown")  inst.y += step;
+          fitWithinRoom(inst);
+        });
+        saveLayouts();
+        drawRoom();
+        renderSelection();
+        return;
+      }
     }
 
     // Selected-item shortcuts
@@ -2096,6 +2252,152 @@ async function downloadGlb() {
   } catch (e) {
     toast("تعذّر تصدير GLB", "err");
   }
+}
+
+// ==========================================================================
+// Comprehensive printable report (Save as PDF from print dialog).
+//   - Apartment overview SVG (rooms + furniture in plan view)
+//   - Per-room sections: dimensions, item list, room subtotal
+//   - Grand total
+//   Renders into a hidden new window so the user's app DOM is untouched.
+// ==========================================================================
+function buildOverviewSvgForPrint() {
+  const bounds = apartmentBounds();
+  const pad = 40;
+  const vbW = bounds.w + pad * 2;
+  const vbH = bounds.h + pad * 2;
+  const rooms = ROOMS.map(r => renderOverviewRoom(r, bounds, pad)).join("");
+  // Inline the few CSS variables used inside renderOverviewRoom so the SVG
+  // is self-contained when shown in a brand-new window.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}"
+            preserveAspectRatio="xMidYMid meet"
+            style="--panel:#fff;--door:#7d3a14;--window:#3066b8;--muted:#444;width:100%;height:100%">
+            <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="#fafaf6" />
+            ${rooms}
+          </svg>`;
+}
+function gatherReportData() {
+  const rooms = ROOMS.map(r => {
+    const items = state.layouts[r.id] || [];
+    // Group identical (groupId,itemId) into a single line with count
+    const lines = new Map();
+    items.forEach(inst => {
+      const it = findItem(inst.groupId, inst.itemId);
+      if (!it) return;
+      const k = `${inst.groupId}|${inst.itemId}`;
+      const price = priceFor(inst);
+      const ent = lines.get(k) || { name: it.name, icon: it.icon || "📦", w: it.w, h: it.h, count: 0, total: 0, unit: price };
+      ent.count++;
+      ent.total += price;
+      lines.set(k, ent);
+    });
+    const subtotal = items.reduce((s, i) => s + priceFor(i), 0);
+    const used = items.reduce((s, i) => {
+      const it = findItem(i.groupId, i.itemId);
+      return it ? s + (it.w * it.h) : s;
+    }, 0);
+    const total = r.width * r.depth;
+    return {
+      room: r, items, lines: [...lines.values()],
+      subtotal,
+      usedPct: total > 0 ? Math.round((used/total)*100) : 0,
+    };
+  });
+  const grand = rooms.reduce((s, r) => s + r.subtotal, 0);
+  const totalItems = rooms.reduce((s, r) => s + r.items.length, 0);
+  return { rooms, grand, totalItems };
+}
+function openPdfReport() {
+  const data = gatherReportData();
+  const win = window.open("", "_blank");
+  if (!win) { toast("امنح إذن النوافذ المنبثقة لإنشاء PDF", "warn"); return; }
+  const fmt = (n) => Number(n || 0).toLocaleString("ar-EG");
+  const today = new Date().toLocaleDateString("ar-EG", { year: "numeric", month: "long", day: "numeric" });
+  const overviewSvg = buildOverviewSvgForPrint();
+  const roomSections = data.rooms.map(({ room, items, lines, subtotal, usedPct }) => {
+    if (!items.length) {
+      return `<section class="room-block">
+        <h2>${esc(room.name)}</h2>
+        <div class="meta">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م</div>
+        <p class="empty">لا توجد قطع في هذه الغرفة.</p>
+      </section>`;
+    }
+    const rows = lines.map(l => `
+      <tr>
+        <td>${esc(l.icon)} ${esc(l.name)}</td>
+        <td class="num">${l.w}×${l.h}</td>
+        <td class="num">${l.count}</td>
+        <td class="num">${l.unit ? fmt(l.unit) : "—"}</td>
+        <td class="num strong">${l.total ? fmt(l.total) + " ج.م" : "—"}</td>
+      </tr>`).join("");
+    return `<section class="room-block">
+      <h2>${esc(room.name)}</h2>
+      <div class="meta">${(room.width/100).toFixed(2)} × ${(room.depth/100).toFixed(2)} م
+        — ارتفاع السقف ${room.height || 270} سم — استخدام ${usedPct}%
+        — إجمالي ${items.length} قطعة</div>
+      <table>
+        <thead><tr><th>القطعة</th><th>الأبعاد (سم)</th><th>العدد</th><th>سعر/قطعة</th><th>الإجمالي</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="4">إجمالي الغرفة</td><td class="num strong">${fmt(subtotal)} ج.م</td></tr></tfoot>
+      </table>
+    </section>`;
+  }).join("");
+  const html = `<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8" />
+<title>تقرير الشقة — ${today}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Cairo", "Tajawal", system-ui, sans-serif; color: #111; margin: 0; }
+  header.report-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
+  header.report-head h1 { margin: 0; font-size: 22px; }
+  header.report-head .date { color: #555; font-size: 13px; }
+  .summary { background: #f5f3ee; border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
+  .summary div b { display: block; font-size: 18px; }
+  .summary div span { color: #555; font-size: 12px; }
+  .overview-wrap { width: 100%; height: 95mm; border: 1px solid #ccc; margin-bottom: 16px; background: #fff; }
+  .overview-wrap svg { width: 100%; height: 100%; }
+  section.room-block { page-break-inside: avoid; margin-bottom: 14px; border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; }
+  section.room-block h2 { margin: 0 0 4px 0; font-size: 17px; color: #333; }
+  section.room-block .meta { color: #666; font-size: 12px; margin-bottom: 8px; }
+  section.room-block .empty { color: #999; font-size: 13px; margin: 4px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 6px 8px; border: 1px solid #ddd; text-align: right; }
+  th { background: #efefe9; font-weight: 600; }
+  td.num { text-align: center; }
+  td.strong { font-weight: 700; }
+  tfoot td { background: #fafaf6; font-weight: 600; }
+  .grand { margin-top: 18px; border-top: 2px solid #333; padding-top: 10px; display: flex; justify-content: space-between; font-size: 18px; font-weight: 700; }
+  .actions { position: fixed; top: 8px; left: 8px; z-index: 9; }
+  .actions button { padding: 8px 14px; font: inherit; cursor: pointer; border: 1px solid #444; background: #fff; border-radius: 4px; }
+  @media print { .actions { display: none; } }
+</style>
+</head>
+<body>
+  <div class="actions"><button onclick="window.print()">🖨️ احفظ كـ PDF</button></div>
+  <header class="report-head">
+    <h1>تقرير الشقة</h1>
+    <div class="date">${esc(today)}</div>
+  </header>
+  <div class="summary">
+    <div><b>${ROOMS.length}</b><span>عدد الغرف</span></div>
+    <div><b>${data.totalItems}</b><span>إجمالي القطع</span></div>
+    <div><b>${fmt(data.grand)} ج.م</b><span>إجمالي التكلفة</span></div>
+  </div>
+  <div class="overview-wrap">${overviewSvg}</div>
+  ${roomSections}
+  <div class="grand">
+    <span>الإجمالي العام</span>
+    <span>${fmt(data.grand)} ج.م</span>
+  </div>
+  <script>setTimeout(function(){ try { window.print(); } catch(e){} }, 300);<\/script>
+</body>
+</html>`;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
 }
 
 // ==========================================================================
