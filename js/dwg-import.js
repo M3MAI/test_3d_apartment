@@ -32,16 +32,22 @@
     if (_modulePromise) return _modulePromise;
 
     _modulePromise = (async () => {
-      // Dynamic ESM import — works in modern browsers.
-      const mod = await import(/* webpackIgnore: true */ CDN_URL);
-      _LibreDwg = mod.LibreDwg || mod.default?.LibreDwg;
-      _Dwg_File_Type = mod.Dwg_File_Type || mod.default?.Dwg_File_Type;
-      if (!_LibreDwg || !_Dwg_File_Type) {
-        throw new Error("حُمِّلت LibreDWG لكن لم نجد LibreDwg / Dwg_File_Type");
+      try {
+        // Dynamic ESM import — works in modern browsers.
+        const mod = await import(/* webpackIgnore: true */ CDN_URL);
+        _LibreDwg = mod.LibreDwg || mod.default?.LibreDwg;
+        _Dwg_File_Type = mod.Dwg_File_Type || mod.default?.Dwg_File_Type;
+        if (!_LibreDwg || !_Dwg_File_Type) {
+          throw new Error("حُمِّلت LibreDWG لكن لم نجد LibreDwg / Dwg_File_Type");
+        }
+        // Tell LibreDWG where the .wasm lives (jsdelivr serves it next to the JS).
+        _instance = await _LibreDwg.create(WASM_BASE);
+        return _instance;
+      } catch (err) {
+        // Clear cache so the next call retries (e.g. user reconnects to wifi).
+        _modulePromise = null;
+        throw err;
       }
-      // Tell LibreDWG where the .wasm lives (jsdelivr serves it next to the JS).
-      _instance = await _LibreDwg.create(WASM_BASE);
-      return _instance;
     })();
 
     return _modulePromise;
