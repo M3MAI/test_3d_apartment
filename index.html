@@ -276,8 +276,14 @@
         <div class="row-actions">
           <button class="btn sm" id="re-add-door">+ باب</button>
           <button class="btn sm" id="re-add-window">+ شباك</button>
+          <label class="btn sm" title="استيراد الغرفة من ملف AutoCAD DXF" style="cursor:pointer">
+            🗎 استيراد DXF
+            <input type="file" id="re-import-dxf" accept=".dxf,text/plain" hidden />
+          </label>
+          <a href="./docs/AUTOCAD.md" target="_blank" class="btn sm ghost" title="دليل اتفاقيات الطبقات" style="text-decoration:none">كيف؟</a>
         </div>
         <p class="hint" id="re-error" hidden></p>
+        <p class="hint" id="re-dxf-note" hidden></p>
       </div>
       <footer class="modal-foot">
         <button class="btn danger" id="room-modal-reset" title="إرجاع للأبعاد الافتراضية">استعادة الافتراضي</button>
@@ -355,6 +361,7 @@
   <script src="js/rooms.js"></script>
   <script src="js/furniture.js"></script>
   <script src="js/custom-items.js"></script>
+  <script src="js/dxf-import.js"></script>
   <script src="js/app.js"></script>
   <script type="module" src="js/three-view.js"></script>
   <script>
