@@ -1,5 +1,5 @@
 // Minimal offline-first service worker (cache-on-install + stale-while-revalidate).
-const CACHE = "apt-v6";
+const CACHE = "apt-v7";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const ASSETS = [
   "./js/furniture.js",
   "./js/custom-items.js",
   "./js/dxf-import.js",
+  "./js/dwg-import.js",
   "./js/app.js",
   "./js/three-view.js",
   "./manifest.webmanifest",
@@ -37,8 +38,13 @@ self.addEventListener("fetch", (e) => {
     (async () => {
       try {
         const fresh = await fetch(req);
-        // Only cache same-origin 200 responses
-        if (fresh && fresh.status === 200 && new URL(req.url).origin === location.origin) {
+        // Cache same-origin 200 responses + the LibreDWG WASM bundle so the
+        // DWG converter works offline once it has loaded successfully once.
+        const u = new URL(req.url);
+        const isSameOrigin = u.origin === location.origin;
+        const isLibreDwg = u.hostname === "cdn.jsdelivr.net" &&
+                           /\/@mlightcad\/libredwg-web/.test(u.pathname);
+        if (fresh && fresh.status === 200 && (isSameOrigin || isLibreDwg)) {
           const copy = fresh.clone();
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         }

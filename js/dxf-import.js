@@ -176,11 +176,17 @@
     return best;
   }
 
-  // Convert raw DXF entities into a single-room override payload.
-  // { width, depth, openings: [...], hint: "..." }
-  function importRoomFromDxf(text) {
-    const { header, entities } = parseDxf(text);
-    const k = unitToCm(header.insunits);
+  // Build a single-room override payload from a normalised entity list +
+  // an $INSUNITS code. Shared between the DXF and DWG paths; see
+  // js/dwg-import.js for the DWG → entity-list translator.
+  //
+  // Entity shape (all fields in the source CAD coordinate system):
+  //   LWPOLYLINE: { type:"LWPOLYLINE", layer, vertices:[{x,y},...], flags }
+  //   LINE:       { type:"LINE", layer, x1, y1, x2, y2 }
+  //   TEXT/MTEXT: { type:"TEXT"|"MTEXT", layer, x1, y1, text }
+  // `flags & 1` indicates a closed polyline.
+  function buildRoomFromEntities(entities, insunits) {
+    const k = unitToCm(insunits || 0);
 
     const outline = pickRoomOutline(entities);
     if (!outline) {
@@ -233,11 +239,22 @@
       stats: {
         wallCount: 1,
         openingCount: openings.length,
-        unit: header.insunits,
-        unitLabel: ["unitless", "in", "ft", "?", "mm", "cm", "m"][header.insunits] || "unitless",
+        unit: insunits,
+        unitLabel: ["unitless", "in", "ft", "?", "mm", "cm", "m"][insunits] || "unitless",
       },
     };
   }
 
-  window.DxfImport = { parseDxf, importRoomFromDxf, unitToCm };
+  // Convert a DXF text payload into a room-override object.
+  function importRoomFromDxf(text) {
+    const { header, entities } = parseDxf(text);
+    return buildRoomFromEntities(entities, header.insunits);
+  }
+
+  window.DxfImport = {
+    parseDxf,
+    importRoomFromDxf,
+    buildRoomFromEntities,
+    unitToCm,
+  };
 })();

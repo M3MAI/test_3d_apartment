@@ -2059,6 +2059,50 @@ function bindRoomModal() {
     });
   }
 
+  // AutoCAD DWG import — same flow as DXF but goes through a WASM converter
+  // (LibreDWG) loaded lazily on first use. ~3MB module is fetched only when
+  // the user actually picks a DWG file.
+  const dwgInput = document.getElementById("re-import-dwg");
+  if (dwgInput) {
+    dwgInput.addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!file) return;
+      const err  = document.getElementById("re-error");
+      const note = document.getElementById("re-dxf-note");
+      const prog = document.getElementById("re-dwg-progress");
+      err.hidden = true; note.hidden = true;
+      try {
+        if (!window.DwgImport) throw new Error("مكتبة DWG غير مُحمَّلة");
+        if (!window.DwgImport.isLoaded()) {
+          prog.textContent = "جارٍ تحميل محوّل DWG (~3MB، أوّل مرّة فقط)…";
+          prog.hidden = false;
+          await window.DwgImport.loadLibrary();
+        }
+        prog.textContent = "جارٍ قراءة الملف…";
+        prog.hidden = false;
+        const res = await window.DwgImport.importRoomFromDwg(file);
+        prog.hidden = true;
+        document.getElementById("re-w").value = res.width;
+        document.getElementById("re-d").value = res.depth;
+        if (res.name) document.getElementById("re-name").value = res.name;
+        renderOpeningsList(res.openings.map(op => ({
+          ...op, label: op.kind === "door" ? "باب" : "شباك",
+        })));
+        note.textContent = `تم الاستيراد من DWG: ${res.width}×${res.depth} سم، ${res.openings.length} فتحة (الوحدة: ${res.stats.unitLabel}). راجِع ثم اضغط حفظ.`;
+        note.hidden = false;
+      } catch (ex) {
+        prog.hidden = true;
+        const msg = ex && ex.message ? ex.message : "ملف غير صالح";
+        const offlineHint = !navigator.onLine
+          ? " — قد لا يعمل التحويل أوفلاين قبل أوّل استخدام ناجح."
+          : "";
+        err.textContent = "فشل قراءة DWG: " + msg + offlineHint;
+        err.hidden = false;
+      }
+    });
+  }
+
   resetBtn.addEventListener("click", () => {
     if (!editingRoomId) return;
     if (!confirm("إرجاع الغرفة لأبعادها الافتراضية؟")) return;
