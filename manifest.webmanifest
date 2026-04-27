@@ -1,0 +1,16 @@
+{
+  "name": "مصمم الشقة التفاعلي",
+  "short_name": "مصمم الشقة",
+  "description": "صمّم شقتك — مسقط علوي و3D وجولة داخل الشقة",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#2563eb",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
