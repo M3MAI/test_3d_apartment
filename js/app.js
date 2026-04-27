@@ -111,8 +111,12 @@ function applyRoomOverrides() {
     if (o.name)   r.name = o.name;
     if (typeof o.width === "number")  r.width = o.width;
     if (typeof o.depth === "number")  r.depth = o.depth;
+    if (typeof o.height === "number") r.height = o.height;
     if (o.wallColor) r.wallColor = o.wallColor;
     if (o.color) r.color = o.color;
+    if (o.accentColor) r.accentColor = o.accentColor;
+    if (o.accentWall)  r.accentWall  = o.accentWall;
+    if (o.floorColor)  r.floorColor  = o.floorColor;
     if (Array.isArray(o.openings)) r.openings = o.openings;
     if (o.plan) r.plan = o.plan;
     if (o.floorTexture) r.floorTexture = o.floorTexture;
