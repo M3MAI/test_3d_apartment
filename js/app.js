@@ -561,6 +561,7 @@ function drawRoom() {
     document.getElementById("room-dims").textContent = "";
     document.getElementById("item-count").textContent = "0 قطعة";
     setCollisionIndicator(0);
+    setBlockedIndicator(0);
     return;
   }
 
@@ -576,6 +577,8 @@ function drawRoom() {
 
   const collisions = detectCollisions(items);
   setCollisionIndicator(collisions.size);
+  const { blocked, violated: violatedOpenings } = detectDoorBlocks(room, items);
+  setBlockedIndicator(blocked.size);
 
   if (state.viewMode === "3d") {
     if (!window.AptThreeView) {
@@ -587,11 +590,11 @@ function drawRoom() {
     // If the 3D scene is already mounted for this room, reconcile items in
     // place (keeps camera & selection smooth across edits). Otherwise, build.
     if (window.AptThreeView.isActiveFor(room.id)) {
-      window.AptThreeView.updateItems(items, findItem, state.selectedInstId, collisions);
+      window.AptThreeView.updateItems(items, findItem, state.selectedInstId, collisions, blocked);
     } else {
       container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
       window.AptThreeView.show(document.getElementById("three-wrap"), {
-        room, items, findItem, collisionSet: collisions,
+        room, items, findItem, collisionSet: collisions, blockedSet: blocked,
         onSelect: (instId) => {
           state.selectedInstId = instId;
           renderSelection();
@@ -613,7 +616,9 @@ function drawRoom() {
           const nextItems = state.layouts[room.id] || [];
           const nextCollisions = detectCollisions(nextItems);
           setCollisionIndicator(nextCollisions.size);
-          window.AptThreeView.updateItems(nextItems, findItem, state.selectedInstId, nextCollisions);
+          const nextBlocked = detectDoorBlocks(room, nextItems).blocked;
+          setBlockedIndicator(nextBlocked.size);
+          window.AptThreeView.updateItems(nextItems, findItem, state.selectedInstId, nextCollisions, nextBlocked);
         },
       });
     }
@@ -629,7 +634,8 @@ function drawRoom() {
         ${renderDefs()}
         <g id="viewport" transform="${viewportTransform(vbW, vbH)}">
           ${renderRoomShell(room)}
-          <g id="fur-layer">${items.map(inst => renderFurniture(inst, collisions)).join("")}</g>
+          <g id="clearance-layer">${renderDoorClearances(room, violatedOpenings)}</g>
+          <g id="fur-layer">${items.map(inst => renderFurniture(inst, collisions, blocked)).join("")}</g>
           ${renderMeasureOverlay(room)}
         </g>
       </svg>
@@ -728,6 +734,7 @@ function drawOverview(container) {
   document.getElementById("item-count").textContent = `${totalItems} قطعة (${ROOMS.length} غرف)`;
   // Cross-room collisions are not meaningful; clear the indicator.
   setCollisionIndicator(0);
+  setBlockedIndicator(0);
 
   const pad = 60;
   const vbW = bounds.w + pad * 2;
@@ -824,6 +831,7 @@ function drawWalkthrough(container) {
   const totalItems = ROOMS.reduce((s, r) => s + (state.layouts[r.id] || []).length, 0);
   document.getElementById("item-count").textContent = `${totalItems} قطعة`;
   setCollisionIndicator(0);
+  setBlockedIndicator(0);
 
   if (!window.AptThreeView) {
     container.innerHTML = `<div class="placeholder"><div class="placeholder-icon">⏳</div><p>جارٍ تحميل محرك 3D…</p></div>`;
@@ -935,7 +943,7 @@ function renderDoorSwing(room, op, px, py) {
   return `<path d="M ${sx} ${sy} A ${size} ${size} 0 0 ${sweep} ${ex} ${ey}" fill="none" stroke="rgba(157,88,51,.3)" stroke-dasharray="3,3" />`;
 }
 
-function renderFurniture(inst, collisionSet) {
+function renderFurniture(inst, collisionSet, blockedSet) {
   const item = findItem(inst.groupId, inst.itemId);
   if (!item) return "";
   const cx = SVG_PADDING + inst.x;
@@ -945,6 +953,7 @@ function renderFurniture(inst, collisionSet) {
   const classes = ["furniture"];
   if (inst.instId === state.selectedInstId) classes.push("selected");
   if (collisionSet && collisionSet.has(inst.instId)) classes.push("collides");
+  if (blockedSet && blockedSet.has(inst.instId)) classes.push("blocks-door");
   const opacity = item.opacity ?? 1;
   const isCustom = inst.groupId === "custom" && item.image;
   const rot = inst.rotation || 0;
@@ -1019,6 +1028,77 @@ function setCollisionIndicator(n) {
     el.className = "collision-warn";
     el.textContent = `⚠ ${n} متداخلة`;
   }
+}
+
+// ---------- Door clearance: detect items blocking doors / windows ----------
+// For each opening, build a clearance rectangle inside the room (door swing
+// area for doors, smaller buffer for windows). Any item whose OBB overlaps
+// that rectangle is flagged as "blocking".
+const DOOR_CLEARANCE_DEPTH = 80;   // cm in front of a door
+const WINDOW_CLEARANCE_DEPTH = 25; // cm in front of a window (lighter buffer)
+function clearanceRectForOpening(room, op) {
+  const depth = op.kind === "door" ? DOOR_CLEARANCE_DEPTH : WINDOW_CLEARANCE_DEPTH;
+  const t = WALL_THICKNESS;
+  // Each rect is described as { x, y, w, h } in room-local coordinates
+  // (i.e. relative to room origin, not SVG_PADDING).
+  switch (op.wall) {
+    case "top":    return { x: op.at,                  y: 0,                       w: op.size, h: depth };
+    case "bottom": return { x: op.at,                  y: room.depth - depth,      w: op.size, h: depth };
+    case "left":   return { x: 0,                      y: op.at,                   w: depth,    h: op.size };
+    case "right":  return { x: room.width - depth,     y: op.at,                   w: depth,    h: op.size };
+  }
+  return null;
+}
+function rectAsObb(r) {
+  // Axis-aligned rect → OBB structure for obbOverlap()
+  return obb(r.x + r.w/2, r.y + r.h/2, r.w, r.h, 0, "_clearance");
+}
+function detectDoorBlocks(room, items) {
+  const blocked = new Set();
+  const violated = []; // openings whose clearance is violated (for highlight)
+  if (!room || !room.openings || !room.openings.length) return { blocked, violated };
+  const itemBoxes = items.map(inst => {
+    const item = findItem(inst.groupId, inst.itemId);
+    if (!item) return null;
+    return { inst, box: obb(inst.x, inst.y, item.w, item.h, inst.rotation || 0, inst.instId) };
+  }).filter(Boolean);
+  for (const op of room.openings) {
+    const r = clearanceRectForOpening(room, op);
+    if (!r) continue;
+    const clearance = rectAsObb(r);
+    let hit = false;
+    for (const { inst, box } of itemBoxes) {
+      if (obbOverlap(clearance, box)) { blocked.add(inst.instId); hit = true; }
+    }
+    if (hit) violated.push(op);
+  }
+  return { blocked, violated };
+}
+function setBlockedIndicator(n) {
+  const el = document.getElementById("blocked-indicator");
+  if (!el) return;
+  if (n === 0) {
+    el.className = "blocked-none";
+    el.textContent = "🚪 سالك";
+    el.title = "لا توجد قطع تحجب الأبواب أو الشبابيك";
+  } else {
+    el.className = "blocked-warn";
+    el.textContent = `🚪 ${n} يحجب`;
+    el.title = `${n} قطعة تحجب باب أو شباك — أبعدها`;
+  }
+}
+function renderDoorClearances(room, violatedOpenings) {
+  if (!room || !room.openings) return "";
+  const ox = SVG_PADDING, oy = SVG_PADDING;
+  const violatedSet = new Set(violatedOpenings.map(o => `${o.wall}|${o.at}|${o.size}|${o.kind}`));
+  return room.openings.map(op => {
+    const r = clearanceRectForOpening(room, op);
+    if (!r) return "";
+    const isViolated = violatedSet.has(`${op.wall}|${op.at}|${op.size}|${op.kind}`);
+    if (op.kind !== "door" && !isViolated) return ""; // only show window clearance when violated
+    const cls = "door-clearance" + (isViolated ? " violated" : "");
+    return `<rect class="${cls}" x="${ox + r.x}" y="${oy + r.y}" width="${r.w}" height="${r.h}" rx="2" />`;
+  }).join("");
 }
 
 // ---------- Touch drag from catalog (mobile) ----------
@@ -1440,6 +1520,10 @@ function renderSelection() {
       <input class="rot-input" type="number" min="0" max="359" step="15" value="${inst.rotation || 0}" aria-label="زاوية الدوران" />
     </div>
     <div class="sel-row">
+      <span>الارتفاع عن الأرض <small>سم</small></span>
+      <input class="lift-input" type="number" min="0" max="280" step="5" value="${Number(inst.liftedZ) || 0}" aria-label="الارتفاع عن الأرض" title="ارفع القطعة عن الأرض (مثال: لوحة على الحائط، رفّ معلَّق)" />
+    </div>
+    <div class="sel-row">
       <span>السعر <small>ج.م</small></span>
       <input class="price-input" type="number" min="0" step="10" value="${curPrice || ""}" placeholder="0" aria-label="السعر" ${priceReadOnly ? "disabled" : ""} />
     </div>
@@ -1474,6 +1558,18 @@ function renderSelection() {
     drawRoom();
     renderSelection();
   });
+  const liftInput = panel.querySelector(".lift-input");
+  if (liftInput) {
+    liftInput.addEventListener("change", () => {
+      const v = parseInt(liftInput.value, 10);
+      if (!Number.isFinite(v)) return;
+      pushHistory();
+      inst.liftedZ = Math.max(0, Math.min(280, v));
+      saveLayouts();
+      drawRoom();
+      renderSelection();
+    });
+  }
 }
 
 function fitWithinRoom(inst) {
@@ -1684,6 +1780,7 @@ function bindRoomModal() {
     document.getElementById("re-name").value  = room.name;
     document.getElementById("re-w").value     = room.width;
     document.getElementById("re-d").value     = room.depth;
+    document.getElementById("re-height").value = room.height || 270;
     document.getElementById("re-wall").value  = room.wallColor || "#cccccc";
     document.getElementById("re-floor").value = room.floorTexture || "default";
     document.getElementById("re-wallmat").value = room.wallTexture || "default";
@@ -1714,9 +1811,10 @@ function bindRoomModal() {
     const name = document.getElementById("re-name").value.trim();
     const w = parseInt(document.getElementById("re-w").value, 10);
     const d = parseInt(document.getElementById("re-d").value, 10);
-    if (!name || !(w > 0) || !(d > 0)) {
+    const h = parseInt(document.getElementById("re-height").value, 10) || 270;
+    if (!name || !(w > 0) || !(d > 0) || !(h >= 200 && h <= 500)) {
       const err = document.getElementById("re-error");
-      err.textContent = "تحقق من الأبعاد والاسم";
+      err.textContent = "تحقق من الأبعاد والاسم (السقف بين 200 و500 سم)";
       err.hidden = false;
       return;
     }
@@ -1729,13 +1827,14 @@ function bindRoomModal() {
     room.name = name;
     room.width = w;
     room.depth = d;
+    room.height = h;
     room.wallColor = wallColor;
     room.floorTexture = floorTexture;
     room.wallTexture = wallTexture;
     room.openings = openings;
     // Persist override
     const ov = loadRoomOverrides();
-    ov[editingRoomId] = { name, width: w, depth: d, wallColor, floorTexture, wallTexture, openings, plan: room.plan };
+    ov[editingRoomId] = { name, width: w, depth: d, height: h, wallColor, floorTexture, wallTexture, openings, plan: room.plan };
     saveRoomOverrides(ov);
     modal.hidden = true;
     // Force full 3D rebuild since room geometry changed

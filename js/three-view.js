@@ -21,8 +21,11 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
-const WALL_HEIGHT   = 270;     // cm
+const WALL_HEIGHT   = 270;     // cm — default ceiling height when room.height is missing
 const WALL_THICK_3D = 10;      // cm
+function wallH(room) {
+  return (room && Number.isFinite(room.height) && room.height >= 200) ? room.height : WALL_HEIGHT;
+}
 
 let ctx = null;                // per-show rendering context  (room-level 3D)
 let aptCtx = null;             // per-show apartment walkthrough context
@@ -87,6 +90,7 @@ function show(container, opts) {
   hide(); // idempotent
   const { room, items, findItem, onSelect, onDrop, onMove } = opts;
   const initialCollisions = opts.collisionSet || new Set();
+  const initialBlocked = opts.blockedSet || new Set();
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(bgColorFromTheme());
@@ -199,7 +203,7 @@ function show(container, opts) {
   };
 
   renderItems(ctx, items);
-  applyCollisionTint(ctx, initialCollisions);
+  applyCollisionTint(ctx, initialCollisions, initialBlocked);
   attachPointerHandlers(ctx, container);
   attachDomDropHandlers(ctx, container);
 
@@ -291,33 +295,36 @@ function meshSignature(inst, item) {
 
 function applyInstTransform(mesh, inst, item) {
   const h = item.depth || defaultHeight(item);
-  mesh.position.set(inst.x, h / 2, inst.y);
+  const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
+  mesh.position.set(inst.x, h / 2 + lift, inst.y);
   mesh.rotation.y = -((inst.rotation || 0) * Math.PI) / 180;
   mesh.userData.rotation = inst.rotation || 0;
 }
 
-function updateItems(items, findItem, selectedInstId, collisionSet) {
+function updateItems(items, findItem, selectedInstId, collisionSet, blockedSet) {
   if (!ctx) return;
   ctx.findItem = findItem;
   renderItems(ctx, items);
   ctx.selectedInstId = selectedInstId || null;
-  applyCollisionTint(ctx, collisionSet || new Set());
+  applyCollisionTint(ctx, collisionSet || new Set(), blockedSet || new Set());
 }
 
 // Red emissive tint on any mesh whose instId is in the collision set.
-function applyCollisionTint(ctx, collisionSet) {
+// Orange tint (lower priority) for items blocking a door/window.
+function applyCollisionTint(ctx, collisionSet, blockedSet = new Set()) {
   ctx.instMeshes.forEach((mesh, instId) => {
     const collides = collisionSet.has(instId);
+    const blocks = !collides && blockedSet.has(instId);
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     mats.forEach(m => {
       if (!m) return;
-      if (collides) {
+      if (collides || blocks) {
         if (m.userData._origEmissive === undefined) {
           m.userData._origEmissive = (m.emissive && m.emissive.getHex) ? m.emissive.getHex() : 0x000000;
           m.userData._origEmissiveIntensity = m.emissiveIntensity ?? 1;
         }
-        if (m.emissive && m.emissive.setHex) m.emissive.setHex(0xff3333);
-        m.emissiveIntensity = 0.55;
+        if (m.emissive && m.emissive.setHex) m.emissive.setHex(collides ? 0xff3333 : 0xffa040);
+        m.emissiveIntensity = collides ? 0.55 : 0.45;
       } else if (m.userData._origEmissive !== undefined) {
         if (m.emissive && m.emissive.setHex) m.emissive.setHex(m.userData._origEmissive);
         m.emissiveIntensity = m.userData._origEmissiveIntensity ?? 1;
@@ -581,13 +588,14 @@ function buildWalls(scene, room) {
     ? new THREE.MeshStandardMaterial({ color: accentHex, roughness: 0.9, side: THREE.DoubleSide })
     : null;
 
+  const H = wallH(room);
   walls.forEach(w => {
     const mat = (accentMat && w.wall === accentWall) ? accentMat : baseMat;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);
     shape.lineTo(w.length, 0);
-    shape.lineTo(w.length, WALL_HEIGHT);
-    shape.lineTo(0, WALL_HEIGHT);
+    shape.lineTo(w.length, H);
+    shape.lineTo(0, H);
     shape.lineTo(0, 0);
 
     const holes = [];
@@ -595,7 +603,7 @@ function buildWalls(scene, room) {
       const x0 = o.at;
       const x1 = o.at + o.size;
       const y0 = o.kind === "door" ? 0 : 90;
-      const y1 = o.kind === "door" ? Math.min(210, WALL_HEIGHT - 10) : Math.min(220, WALL_HEIGHT - 10);
+      const y1 = o.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
       const hole = new THREE.Path();
       hole.moveTo(x0, y0);
       hole.lineTo(x1, y0);
@@ -674,7 +682,8 @@ function buildFurnitureMesh(inst, item) {
   mesh.userData.groupId = inst.groupId;
   mesh.userData.itemId  = inst.itemId;
   mesh.userData.rotation = inst.rotation || 0;
-  mesh.position.set(inst.x, h / 2, inst.y);
+  const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
+  mesh.position.set(inst.x, h / 2 + lift, inst.y);
   mesh.rotation.y = -((inst.rotation || 0) * Math.PI) / 180;
   return mesh;
 }
@@ -895,13 +904,14 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     ? new THREE.MeshStandardMaterial({ color: accentHex, roughness: 0.9, side: THREE.DoubleSide })
     : null;
 
+  const H = wallH(room);
   walls.forEach(w => {
     const mat = (accentMat && w.wall === accentWall) ? accentMat : baseMat;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);
     shape.lineTo(w.length, 0);
-    shape.lineTo(w.length, WALL_HEIGHT);
-    shape.lineTo(0, WALL_HEIGHT);
+    shape.lineTo(w.length, H);
+    shape.lineTo(0, H);
     shape.lineTo(0, 0);
 
     const holes = [];
@@ -909,7 +919,7 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
       const x0 = o.at;
       const x1 = o.at + o.size;
       const y0 = o.kind === "door" ? 0 : 90;
-      const y1 = o.kind === "door" ? Math.min(210, WALL_HEIGHT - 10) : Math.min(220, WALL_HEIGHT - 10);
+      const y1 = o.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
       const hole = new THREE.Path();
       hole.moveTo(x0, y0); hole.lineTo(x1, y0); hole.lineTo(x1, y1); hole.lineTo(x0, y1); hole.lineTo(x0, y0);
       holes.push(hole);

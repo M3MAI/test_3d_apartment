@@ -268,6 +268,8 @@ main {
 .stage-meta .sep { margin: 0 6px; }
 .collision-none { color: var(--ok); font-weight: 600; }
 .collision-warn { color: var(--danger); font-weight: 700; }
+.blocked-none { color: var(--ok); font-weight: 600; }
+.blocked-warn { color: #b46a00; font-weight: 700; }
 
 .view-controls {
   display: flex;
@@ -322,6 +324,12 @@ main {
 .furniture.selected .fur-frame { stroke: var(--accent); stroke-width: 3; }
 .furniture.collides .fur-body,
 .furniture.collides .fur-frame { stroke: var(--danger); stroke-dasharray: 6 4; stroke-width: 3; }
+.furniture.blocks-door .fur-body,
+.furniture.blocks-door .fur-frame { stroke: #d68a00; stroke-dasharray: 4 3; stroke-width: 3; }
+.furniture.blocks-door.collides .fur-body,
+.furniture.blocks-door.collides .fur-frame { stroke: var(--danger); }
+.door-clearance { fill: rgba(214, 138, 0, .12); stroke: rgba(214, 138, 0, .6); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.door-clearance.violated { fill: rgba(214, 138, 0, .25); stroke: #b46a00; }
 .fur-body {
   fill-opacity: .92;
   stroke: rgba(0,0,0,.25);
