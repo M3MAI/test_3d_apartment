@@ -12,6 +12,7 @@ const ONBOARDED_KEY      = "apt_onboarded_v1";
 const WALL_THICKNESS  = 10;      // cm, visual thickness of walls in plan
 const SVG_PADDING     = 40;      // svg viewport padding around the room
 const GRID_SNAP       = 5;       // cm snap grid
+const WALL_SNAP_THRESHOLD = 15;  // cm — auto-snap furniture flush to wall within this distance
 const HISTORY_LIMIT   = 60;      // undo stack depth
 const ZOOM_MIN        = 0.3;
 const ZOOM_MAX        = 4.0;
@@ -122,6 +123,8 @@ function applyRoomOverrides() {
     if (o.plan) r.plan = o.plan;
     if (o.floorTexture) r.floorTexture = o.floorTexture;
     if (o.wallTexture)  r.wallTexture  = o.wallTexture;
+    if (o.wallTextures) r.wallTextures = o.wallTextures;
+    if (o.vertices && Array.isArray(o.vertices)) r.vertices = o.vertices;
   });
 }
 
@@ -160,6 +163,9 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSunSlider();
   bindMeasure();
   bindShareExportButtons();
+  bindCostModal();
+  bindWallPhotoUploads();
+  bindEyedropperButtons();
   bindOnboarding();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
@@ -725,6 +731,8 @@ function drawRoom() {
   setupFurnitureInteractions(svg, room);
   setupZoomPan(svg, container);
   if (state.measure.active) setupMeasureClicks(svg, room);
+  // Show distance labels for selected furniture
+  renderDistanceLabels(svg, room);
 }
 
 // ---------- Measure overlay (2D) ----------
@@ -1448,15 +1456,25 @@ function setupFurnitureInteractions(svg, room) {
       const altSnap = ev.altKey || ev.metaKey;
       let snappedRotation = inst.rotation || 0;
 
-      // --- Wall snap (Alt+drag): choose nearest wall, align item flush to it ---
+      // --- Automatic wall proximity snap: snap edge flush if within threshold ---
+      if (!altSnap) {
+        const dT = ny - effH0 / 2;                       // top edge → top wall
+        const dB = (room.depth - ny) - effH0 / 2;        // bottom edge → bottom wall
+        const dL = nx - effW0 / 2;                        // left edge → left wall
+        const dR = (room.width - nx) - effW0 / 2;         // right edge → right wall
+        if (dT >= 0 && dT < WALL_SNAP_THRESHOLD) ny = effH0 / 2;
+        if (dB >= 0 && dB < WALL_SNAP_THRESHOLD) ny = room.depth - effH0 / 2;
+        if (dL >= 0 && dL < WALL_SNAP_THRESHOLD) nx = effW0 / 2;
+        if (dR >= 0 && dR < WALL_SNAP_THRESHOLD) nx = room.width - effW0 / 2;
+      }
+
+      // --- Alt+drag: force snap to nearest wall WITH rotation ---
       if (altSnap) {
         const dT = ny - effH0/2;                    // distance from top wall
         const dB = (room.depth - ny) - effH0/2;     // bottom
         const dL = nx - effW0/2;                    // left
         const dR = (room.width - nx) - effW0/2;     // right
         const min = Math.min(dT, dB, dL, dR);
-        // Pick snappedRotation first, then compute effective dims for THAT rotation
-        // so the item ends up flush with the wall (previous code used pre-rotation dims).
         if      (min === dT) snappedRotation = 0;
         else if (min === dB) snappedRotation = 180;
         else if (min === dL) snappedRotation = 90;
@@ -1521,6 +1539,8 @@ function setupFurnitureInteractions(svg, room) {
         });
       }
       drawAlignGuides(svg, guides, room);
+      // Live distance labels during drag
+      renderDistanceLabels(svg, room);
     }
     function onUp() {
       document.removeEventListener("mousemove", onMove);
@@ -2137,6 +2157,36 @@ function bindRoomModal() {
     });
   }
 
+  // Shape editor button — close modal, open shape editing on the room SVG
+  const shapeBtn = document.getElementById("btn-shape-edit");
+  if (shapeBtn) {
+    shapeBtn.addEventListener("click", () => {
+      if (!editingRoomId) return;
+      const room = ROOMS.find(r => r.id === editingRoomId);
+      if (!room) return;
+      modal.hidden = true;
+      // Ensure we're in 2D mode
+      if (state.viewMode !== "2d") setViewMode("2d");
+      // Wait for drawRoom to complete, then attach shape editor
+      setTimeout(() => {
+        const svgEl = document.querySelector(".room-svg");
+        if (!svgEl || !window.ShapeEditor) {
+          toast("تعذّر فتح محرر الشكل", "warn");
+          return;
+        }
+        toast("محرر الشكل: اسحب النقاط لتعديل الشكل، انقر الدوائر الصغيرة لإضافة نقطة، كليك يمين لحذف نقطة");
+        window.ShapeEditor.startEditing(svgEl, room, (newVertices) => {
+          room.vertices = newVertices;
+          // Persist
+          const ov = loadRoomOverrides();
+          if (!ov[room.id]) ov[room.id] = {};
+          ov[room.id].vertices = newVertices;
+          saveRoomOverrides(ov);
+        });
+      }, 200);
+    });
+  }
+
   resetBtn.addEventListener("click", () => {
     if (!editingRoomId) return;
     if (!confirm("إرجاع الغرفة لأبعادها الافتراضية؟")) return;
@@ -2181,9 +2231,16 @@ function bindRoomModal() {
     room.floorTexture = floorTexture;
     room.wallTexture = wallTexture;
     room.openings = openings;
+    // Collect wall photo textures from upload buttons
+    const wallTextures = {};
+    ["top", "bottom", "left", "right"].forEach(wid => {
+      const btn = document.getElementById(`re-wall-photo-${wid}`);
+      if (btn && btn.dataset.wallPhotoData) wallTextures[wid] = btn.dataset.wallPhotoData;
+    });
+    if (Object.keys(wallTextures).length) room.wallTextures = wallTextures;
     // Persist override
     const ov = loadRoomOverrides();
-    ov[editingRoomId] = { name, width: w, depth: d, height: h, wallColor, wallColors, floorTexture, wallTexture, openings, plan: room.plan };
+    ov[editingRoomId] = { name, width: w, depth: d, height: h, wallColor, wallColors, wallTextures: room.wallTextures, floorTexture, wallTexture, openings, plan: room.plan };
     saveRoomOverrides(ov);
     modal.hidden = true;
     // Force full 3D rebuild since room geometry changed
@@ -2672,4 +2729,250 @@ function updateRoomStats(room, items) {
     costEl.textContent = cost > 0 ? (cost.toLocaleString("ar-EG") + " ج.م") : "—";
     costEl.title = `إجمالي التكلفة: ${cost} ج.م`;
   }
+}
+
+// ==========================================================================
+// Feature 2: Live Distance Labels — shows distance from selected furniture to walls
+// ==========================================================================
+function renderDistanceLabels(svg, room) {
+  let layer = svg.querySelector("#distance-labels-layer");
+  const viewport = svg.querySelector("#viewport");
+  if (!viewport) return;
+  if (!layer) {
+    layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    layer.id = "distance-labels-layer";
+    viewport.appendChild(layer);
+  }
+  layer.innerHTML = "";
+
+  if (!state.selectedInstId || !state.activeRoomId) return;
+  const inst = (state.layouts[state.activeRoomId] || []).find(i => i.instId === state.selectedInstId);
+  if (!inst) return;
+  const item = findItem(inst.groupId, inst.itemId);
+  if (!item) return;
+
+  const dims = effectiveDims(item, inst);
+  const rot = (inst.rotation || 0) % 180;
+  const w = rot === 90 ? dims.h : dims.w;
+  const h = rot === 90 ? dims.w : dims.h;
+  const cx = inst.x, cy = inst.y;
+  const P = SVG_PADDING;
+
+  // 4 distances: top, bottom, left, right
+  const distances = [
+    { label: "↑", dist: cy - h/2, x1: cx, y1: 0, x2: cx, y2: cy - h/2 },               // to top wall
+    { label: "↓", dist: room.depth - cy - h/2, x1: cx, y1: cy + h/2, x2: cx, y2: room.depth },  // to bottom
+    { label: "←", dist: cx - w/2, x1: 0, y1: cy, x2: cx - w/2, y2: cy },               // to left
+    { label: "→", dist: room.width - cx - w/2, x1: cx + w/2, y1: cy, x2: room.width, y2: cy },  // to right
+  ];
+
+  distances.forEach(d => {
+    if (d.dist < 1) return; // touching wall, no need
+    const isVert = (d.x1 === d.x2);
+    // Dashed line
+    const ln = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    ln.setAttribute("class", "distance-line");
+    ln.setAttribute("x1", P + d.x1);
+    ln.setAttribute("y1", P + d.y1);
+    ln.setAttribute("x2", P + d.x2);
+    ln.setAttribute("y2", P + d.y2);
+    layer.appendChild(ln);
+
+    // Text label
+    const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    txt.setAttribute("class", "distance-text");
+    const mx = P + (d.x1 + d.x2) / 2;
+    const my = P + (d.y1 + d.y2) / 2;
+    txt.setAttribute("x", mx + (isVert ? 8 : 0));
+    txt.setAttribute("y", my + (isVert ? 0 : -6));
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("dominant-baseline", "middle");
+    txt.textContent = fmtCm(Math.round(d.dist));
+    layer.appendChild(txt);
+  });
+}
+
+// ==========================================================================
+// Feature 3: Total Cost Summary Modal
+// ==========================================================================
+function renderCostSummary() {
+  const modal = document.getElementById("cost-modal");
+  if (!modal) return;
+  const body = modal.querySelector(".cost-body");
+  if (!body) return;
+
+  let grandTotal = 0;
+  let html = "";
+
+  ROOMS.forEach(room => {
+    const items = state.layouts[room.id] || [];
+    if (!items.length) return;
+
+    // Group items by type
+    const groups = {};
+    items.forEach(inst => {
+      const item = findItem(inst.groupId, inst.itemId);
+      if (!item) return;
+      const key = `${inst.groupId}:${inst.itemId}`;
+      if (!groups[key]) groups[key] = { item, insts: [], price: priceFor(inst) };
+      groups[key].insts.push(inst);
+    });
+
+    let roomCost = 0;
+    let rows = "";
+    Object.values(groups).forEach(g => {
+      const qty = g.insts.length;
+      const unitPrice = g.price;
+      const subtotal = qty * unitPrice;
+      roomCost += subtotal;
+      rows += `<tr>
+        <td>${esc(g.item.icon || "📦")} ${esc(g.item.name)}</td>
+        <td>${qty}</td>
+        <td>${unitPrice > 0 ? unitPrice.toLocaleString("ar-EG") : "—"}</td>
+        <td>${subtotal > 0 ? subtotal.toLocaleString("ar-EG") : "—"}</td>
+      </tr>`;
+    });
+    grandTotal += roomCost;
+
+    html += `
+      <div class="cost-room-section">
+        <h4>${esc(room.name)}</h4>
+        <table class="cost-table">
+          <thead><tr><th>القطعة</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="3"><b>إجمالي الغرفة</b></td><td><b>${roomCost > 0 ? roomCost.toLocaleString("ar-EG") + " ج.م" : "—"}</b></td></tr></tfoot>
+        </table>
+      </div>`;
+  });
+
+  if (!html) html = `<p class="empty-cost">لا توجد قطع أثاث بعد. أضف أثاثاً للغرف لرؤية التكلفة.</p>`;
+
+  body.innerHTML = html + `
+    <div class="cost-grand-total">
+      <span>الإجمالي الكلي</span>
+      <b>${grandTotal > 0 ? grandTotal.toLocaleString("ar-EG") + " ج.م" : "—"}</b>
+    </div>`;
+}
+
+function exportCostCSV() {
+  let csv = "الغرفة,القطعة,الكمية,سعر الوحدة,الإجمالي\n";
+  ROOMS.forEach(room => {
+    const items = state.layouts[room.id] || [];
+    const groups = {};
+    items.forEach(inst => {
+      const item = findItem(inst.groupId, inst.itemId);
+      if (!item) return;
+      const key = `${inst.groupId}:${inst.itemId}`;
+      if (!groups[key]) groups[key] = { item, count: 0, price: priceFor(inst) };
+      groups[key].count++;
+    });
+    Object.values(groups).forEach(g => {
+      csv += `${room.name},${g.item.name},${g.count},${g.price},${g.count * g.price}\n`;
+    });
+  });
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "apartment_costs.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function bindCostModal() {
+  const btn = document.getElementById("btn-cost");
+  const modal = document.getElementById("cost-modal");
+  if (!btn || !modal) return;
+  const closeBtn = modal.querySelector(".cost-modal-close");
+  const csvBtn = modal.querySelector(".cost-csv-btn");
+
+  btn.addEventListener("click", () => {
+    renderCostSummary();
+    modal.hidden = false;
+  });
+  if (closeBtn) closeBtn.addEventListener("click", () => modal.hidden = true);
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+  if (csvBtn) csvBtn.addEventListener("click", exportCostCSV);
+}
+
+// ==========================================================================
+// Feature 4: Wall Photo Texture — upload a photo for any wall
+// ==========================================================================
+function resizeImageToDataURL(file, maxPx, callback) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      callback(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function bindWallPhotoUploads() {
+  ["top", "bottom", "left", "right"].forEach(wallId => {
+    const btn = document.getElementById(`re-wall-photo-${wallId}`);
+    const input = document.getElementById(`re-wall-photo-input-${wallId}`);
+    const preview = document.getElementById(`re-wall-photo-preview-${wallId}`);
+    if (!btn || !input) return;
+    btn.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      resizeImageToDataURL(file, 1024, (dataUrl) => {
+        if (preview) {
+          preview.src = dataUrl;
+          preview.hidden = false;
+        }
+        // Store temporarily; will be saved when user clicks Save
+        btn.dataset.wallPhotoData = dataUrl;
+      });
+      input.value = "";
+    });
+  });
+}
+
+// ==========================================================================
+// Feature 5: Eyedropper — pick color from uploaded photo
+// ==========================================================================
+function bindEyedropperButtons() {
+  document.querySelectorAll(".wall-eyedropper-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const wallId = btn.dataset.wall;
+      const colorInput = document.getElementById(`re-wall-${wallId}`);
+      if (!colorInput) return;
+
+      // Create a temporary file input to select a photo
+      const tempInput = document.createElement("input");
+      tempInput.type = "file";
+      tempInput.accept = "image/*";
+      tempInput.addEventListener("change", () => {
+        const file = tempInput.files && tempInput.files[0];
+        if (!file || !window.ColorPicker) return;
+        const url = URL.createObjectURL(file);
+        // Close the room modal temporarily so the picker overlay is visible
+        const modal = document.getElementById("room-modal");
+        if (modal) modal.hidden = true;
+
+        window.ColorPicker.open(url, (hex) => {
+          colorInput.value = hex;
+          // Trigger change event so any listeners update
+          colorInput.dispatchEvent(new Event("input", { bubbles: true }));
+          URL.revokeObjectURL(url);
+          // Re-open room modal
+          if (modal) modal.hidden = false;
+          toast(`تم اختيار اللون ${hex} 🎨`);
+        });
+      });
+      tempInput.click();
+    });
+  });
 }

@@ -770,3 +770,260 @@ kbd {
   .furniture.selected .fur-body { stroke: #333; stroke-width: 1; }
   .furniture.collides .fur-body { stroke: #333; stroke-dasharray: none; }
 }
+
+/* ==========================================================================
+   Feature 2: Distance Labels
+   ========================================================================== */
+.distance-line {
+  stroke: #ff6b35;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.distance-text {
+  fill: #ff6b35;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: Cairo, sans-serif;
+  paint-order: stroke fill;
+  stroke: var(--panel);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Feature 3: Cost Summary Modal
+   ========================================================================== */
+.cost-room-section { margin-bottom: 20px; }
+.cost-room-section h4 {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: var(--accent-soft);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--accent);
+}
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cost-table th {
+  background: var(--panel-2);
+  padding: 6px 8px;
+  text-align: right;
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cost-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.cost-table tbody tr:nth-child(even) { background: var(--panel-2); }
+.cost-table tfoot td {
+  padding: 8px;
+  border-top: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+.cost-grand-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  margin-top: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: #fff;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.empty-cost {
+  text-align: center;
+  color: var(--muted);
+  padding: 24px;
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   Feature 4: Wall Photo 
+   ========================================================================== */
+.wall-photo-btn {
+  font-size: 12px !important;
+  padding: 2px 6px !important;
+  min-width: auto !important;
+}
+.wall-photo-preview {
+  display: block;
+  width: 60px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  margin-top: 4px;
+}
+.wall-color-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ==========================================================================
+   Feature 5: Color Picker Overlay
+   ========================================================================== */
+.color-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  animation: cp-fadein 0.2s ease;
+}
+@keyframes cp-fadein { from { opacity: 0; } to { opacity: 1; } }
+
+.cp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 20px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+.cp-title {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: Cairo, sans-serif;
+}
+.cp-close-btn {
+  color: #fff !important;
+  border-color: rgba(255,255,255,0.3) !important;
+}
+.cp-canvas-wrap {
+  position: relative;
+  cursor: crosshair;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.cp-canvas {
+  display: block;
+  border-radius: 8px;
+}
+.cp-magnifier {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.cp-mag-canvas {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+}
+.cp-color-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: rgba(0,0,0,0.7);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
+.cp-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+}
+.cp-hex {
+  color: #fff;
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cp-crosshair {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.8);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.3);
+}
+.cp-hint {
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+  font-family: Cairo, sans-serif;
+}
+/* Eyedropper button in room editor */
+.wall-eyedropper-btn {
+  font-size: 11px !important;
+  padding: 2px 5px !important;
+  min-width: auto !important;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   Feature 6: Room Shape Editor
+   ========================================================================== */
+.shape-polygon {
+  fill: rgba(46, 92, 255, 0.05);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 8 4;
+  pointer-events: none;
+}
+.shape-vertex {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 2;
+  cursor: grab;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.3));
+  transition: r 0.15s;
+}
+.shape-vertex:hover { r: 9; fill: var(--accent-dark); }
+.shape-midpoint {
+  fill: rgba(46, 92, 255, 0.3);
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  cursor: cell;
+  transition: fill 0.15s, r 0.15s;
+}
+.shape-midpoint:hover { fill: var(--accent); r: 7; }
+.shape-label {
+  fill: var(--muted);
+  font-size: 9px;
+  font-family: Cairo, sans-serif;
+  pointer-events: none;
+}
+.shape-area-label {
+  fill: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  font-family: Cairo, sans-serif;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: var(--panel);
+  stroke-width: 4px;
+}
+/* Shape edit toggle button */
+.shape-edit-btn {
+  font-size: 11px !important;
+}

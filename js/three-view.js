@@ -593,10 +593,18 @@ function buildWalls(scene, room) {
     // Use the exact hex color — MeshBasicMaterial ignores scene lighting
     // so the wall renders the EXACT color from the hex value, no distortion.
     const colorInt = hexToInt(wallHex);
-    const mat = new THREE.MeshBasicMaterial({
-      color: colorInt,
-      side: THREE.DoubleSide,
-    });
+    const matOpts = { color: colorInt, side: THREE.DoubleSide };
+    // If a wall photo texture was uploaded, apply it
+    const wallTextures = room.wallTextures || {};
+    if (wallTextures[w.wall]) {
+      try {
+        const tex = new THREE.TextureLoader().load(wallTextures[w.wall]);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        matOpts.map = tex;
+        matOpts.color = 0xffffff; // don't tint the texture
+      } catch(e) { /* fallback to flat color */ }
+    }
+    const mat = new THREE.MeshBasicMaterial(matOpts);
 
     const shape = new THREE.Shape();
     shape.moveTo(0, 0);

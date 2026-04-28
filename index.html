@@ -38,6 +38,7 @@
       <button id="btn-share" class="btn icon-btn" title="نسخ رابط مشاركة التصميم" aria-label="مشاركة">🔗</button>
       <button id="btn-png"   class="btn icon-btn" title="حفظ لقطة من المشهد (PNG)" aria-label="لقطة">📸</button>
       <button id="btn-glb"   class="btn icon-btn" title="تصدير ملف 3D (GLB)" aria-label="GLB">📦</button>
+      <button id="btn-cost"  class="btn icon-btn" title="ملخص التكلفة" aria-label="تكلفة">💰</button>
       <button id="btn-help"  class="btn icon-btn" title="اختصارات لوحة المفاتيح (?)" aria-label="مساعدة">?</button>
       <span class="divider" aria-hidden="true"></span>
       <button id="btn-reset"  class="btn danger"  title="إعادة ضبط الغرفة الحالية">إعادة ضبط</button>
@@ -226,18 +227,42 @@
           <label class="wall-color-item" title="الحائط الشمالي (أعلى)">
             <span>↑ شمال</span>
             <input type="color" id="re-wall-top" />
+            <div style="display:flex;gap:4px">
+              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-top" title="صورة للحائط">📷</button>
+              <button class="btn sm ghost wall-eyedropper-btn" data-wall="top" title="اختيار لون من صورة">🔍</button>
+            </div>
+            <input type="file" id="re-wall-photo-input-top" accept="image/*" hidden />
+            <img id="re-wall-photo-preview-top" class="wall-photo-preview" hidden />
           </label>
           <label class="wall-color-item" title="الحائط الجنوبي (أسفل)">
             <span>↓ جنوب</span>
             <input type="color" id="re-wall-bottom" />
+            <div style="display:flex;gap:4px">
+              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-bottom" title="صورة للحائط">📷</button>
+              <button class="btn sm ghost wall-eyedropper-btn" data-wall="bottom" title="اختيار لون من صورة">🔍</button>
+            </div>
+            <input type="file" id="re-wall-photo-input-bottom" accept="image/*" hidden />
+            <img id="re-wall-photo-preview-bottom" class="wall-photo-preview" hidden />
           </label>
           <label class="wall-color-item" title="الحائط الشرقي (يمين)">
             <span>→ شرق</span>
             <input type="color" id="re-wall-right" />
+            <div style="display:flex;gap:4px">
+              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-right" title="صورة للحائط">📷</button>
+              <button class="btn sm ghost wall-eyedropper-btn" data-wall="right" title="اختيار لون من صورة">🔍</button>
+            </div>
+            <input type="file" id="re-wall-photo-input-right" accept="image/*" hidden />
+            <img id="re-wall-photo-preview-right" class="wall-photo-preview" hidden />
           </label>
           <label class="wall-color-item" title="الحائط الغربي (يسار)">
             <span>← غرب</span>
             <input type="color" id="re-wall-left" />
+            <div style="display:flex;gap:4px">
+              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-left" title="صورة للحائط">📷</button>
+              <button class="btn sm ghost wall-eyedropper-btn" data-wall="left" title="اختيار لون من صورة">🔍</button>
+            </div>
+            <input type="file" id="re-wall-photo-input-left" accept="image/*" hidden />
+            <img id="re-wall-photo-preview-left" class="wall-photo-preview" hidden />
           </label>
         </div>
         <div class="fields-row">
@@ -293,6 +318,9 @@
             <input type="file" id="re-import-dxf" accept=".dxf,text/plain" hidden />
           </label>
           <a href="./docs/AUTOCAD.md" target="_blank" class="btn sm ghost" title="دليل اتفاقيات الطبقات" style="text-decoration:none">كيف؟</a>
+        </div>
+        <div class="fields-row" style="margin-top:8px">
+          <button class="btn sm ghost shape-edit-btn" id="btn-shape-edit" title="تعديل شكل الغرفة (مضلعات مخصصة)">✏️ تعديل الشكل (L-shape / مخصص)</button>
         </div>
         <p class="hint" id="re-error" hidden></p>
         <p class="hint" id="re-dxf-note" hidden></p>
@@ -354,6 +382,21 @@
     </div>
   </div>
 
+  <!-- Cost Summary Modal -->
+  <div class="modal-backdrop" id="cost-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
+      <header class="modal-head">
+        <h3>💰 ملخص التكلفة</h3>
+        <button class="btn sm icon-btn cost-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body cost-body"></div>
+      <footer class="modal-foot">
+        <button class="btn sm cost-csv-btn">📥 تصدير CSV</button>
+        <button class="btn sm ghost cost-modal-close">إغلاق</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Onboarding overlay (first visit only) -->
   <div class="onboarding" id="onboarding" hidden>
     <div class="ob-card">
@@ -374,6 +417,8 @@
   <script src="js/furniture.js"></script>
   <script src="js/custom-items.js"></script>
   <script src="js/dxf-import.js"></script>
+  <script src="js/color-picker.js"></script>
+  <script src="js/shape-editor.js"></script>
   <script src="js/app.js"></script>
   <script type="module" src="js/three-view.js"></script>
   <script>
