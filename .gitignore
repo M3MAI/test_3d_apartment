@@ -1,0 +1,11 @@
+# Large video file (optional — remove this line if you want it on GitHub)
+apartment_video.mp4
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Editor files
+.vscode/
+*.swp
+*.swo
