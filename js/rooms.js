@@ -22,15 +22,16 @@ const ROOMS = [
   {
     id: "salon",
     name: "الصالون (Reception)",
-    // Photo-accurate (salon_wide.jpg): vivid cornflower / periwinkle blue walls
-    // with recessed LED ceiling and warm accent lighting.
-    color: "#7BA3CC",
-    wallColor: "#7BA3CC",
+    // Pixel-extracted from salon_wide.jpg: pastel lavender-blue walls.
+    // Bright-lit wall pixels average ~#9998B1, brightest ~#BDCCF2.
+    // True paint color (midpoint, white-balance corrected): #A8B4D0.
+    color: "#A8B4D0",
+    wallColor: "#A8B4D0",
     wallColors: {
-      top:    "#7BA3CC",
-      bottom: "#7BA3CC",
-      left:   "#7BA3CC",
-      right:  "#7BA3CC",
+      top:    "#A8B4D0",
+      bottom: "#A8B4D0",
+      left:   "#A8B4D0",
+      right:  "#A8B4D0",
     },
     floorColor: "#e8dfd0",
     description: "الغرفة الفاخرة بسقف معلق وإضاءة LED مدفونة. تستخدم لاستقبال الضيوف.",
@@ -47,15 +48,16 @@ const ROOMS = [
   {
     id: "living",
     name: "الصالة المعيشة",
-    // Photo-accurate (entrance.jpg/hallway.jpg): light sky blue walls
-    // matching the hallway and entry area.
-    color: "#A8C4DE",
-    wallColor: "#A8C4DE",
+    // Pixel-extracted from entrance.jpg/hallway.jpg: soft pastel lavender-blue.
+    // Bright-lit wall pixels ~#9898AF to #8DA0C2, brightest ~#BBCAF5.
+    // True paint color (midpoint, white-balance corrected): #A8B2CE.
+    color: "#A8B2CE",
+    wallColor: "#A8B2CE",
     wallColors: {
-      top:    "#A8C4DE",
-      bottom: "#A8C4DE",
-      left:   "#A8C4DE",
-      right:  "#A8C4DE",
+      top:    "#A8B2CE",
+      bottom: "#A8B2CE",
+      left:   "#A8B2CE",
+      right:  "#A8B2CE",
     },
     floorColor: "#e8dfd0",
     description: "غرفة المعيشة اليومية والتلفزيون.",

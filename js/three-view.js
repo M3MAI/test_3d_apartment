@@ -590,15 +590,12 @@ function buildWalls(scene, room) {
       : (room.accentColor && room.accentWall === w.wall
           ? room.accentColor
           : (room.wallColor || "#eeeeee"));
-    // Use the exact hex color — no lightening shift so colors stay true to life.
+    // Use the exact hex color — MeshBasicMaterial ignores scene lighting
+    // so the wall renders the EXACT color from the hex value, no distortion.
     const colorInt = hexToInt(wallHex);
-    const mat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshBasicMaterial({
       color: colorInt,
-      roughness: 0.75,
       side: THREE.DoubleSide,
-      // Small emissive prevents colors from looking too dark in shadow areas.
-      emissive: colorInt,
-      emissiveIntensity: 0.08,
     });
 
     const shape = new THREE.Shape();

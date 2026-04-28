@@ -4,7 +4,7 @@
 const STORAGE_KEY     = "apt_layout_v1";
 const ACTIVE_ROOM_KEY = "apt_active_room";
 const THEME_KEY       = "apt_theme";
-const ROOM_OVERRIDES_KEY = "apt_room_overrides_v1";
+const ROOM_OVERRIDES_KEY = "apt_room_overrides_v2"; // bumped from v1 to clear stale wall colors
 const NAMED_LAYOUTS_KEY  = "apt_named_layouts_v1";
 const PRICES_KEY         = "apt_prices_v1";        // { "groupId:itemId": number }
 const UNIT_KEY           = "apt_unit";              // "cm" | "m" | "ft"
