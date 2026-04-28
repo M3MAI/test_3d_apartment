@@ -126,8 +126,8 @@ function show(container, opts) {
   // Floor — use explicit floorColor if defined; otherwise a neutral tile color
   // so the wall color stays distinct from the floor (the old code used
   // wallColor for both, which made the floor blend into the walls).
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: hexToInt(room.floorColor || "#e6ddcf"), roughness: 0.95,
+  const floorMat = new THREE.MeshBasicMaterial({
+    color: hexToInt(room.floorColor || "#e6ddcf"),
   });
   const floorGeo = new THREE.PlaneGeometry(room.width, room.depth);
   const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -770,7 +770,7 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
   scene.add(sun);
 
   // Unified floor spanning whole apartment (light neutral)
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xd8ccb8, roughness: 0.95 });
+  const floorMat = new THREE.MeshBasicMaterial({ color: 0xd8ccb8 });
   const floorGeo = new THREE.PlaneGeometry(bounds.w + 200, bounds.h + 200);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
