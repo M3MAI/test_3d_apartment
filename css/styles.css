@@ -471,12 +471,10 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 .plan-svg .plan-room:hover rect:first-of-type { stroke-width: 14; }
 
 .three-wrap {
-  flex: 1;
-  align-self: stretch;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  position: relative;
-  min-height: 300px;
 }
 .three-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
 .walk-wrap { min-height: 500px; }
