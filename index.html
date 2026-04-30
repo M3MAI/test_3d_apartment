@@ -101,7 +101,15 @@
           <button class="btn sm" id="btn-zoom-in"  title="تكبير (+)" aria-label="تكبير">+</button>
           <button class="btn sm" id="btn-zoom-fit" title="ملاءمة للشاشة (F)" aria-label="ملاءمة">⤢</button>
           <button class="btn sm" id="btn-measure" title="أداة قياس (M)" aria-label="قياس">📏</button>
-
+          <span class="view-sep wall-sep" aria-hidden="true" hidden></span>
+          <div class="wall-visibility" role="group" aria-label="إظهار/إخفاء الجدران (3D فقط)" hidden>
+            <span class="wall-vis-label" title="إظهار/إخفاء الجدران">👁️</span>
+            <button class="btn sm wall-vis-btn active" data-wall="top"    title="الجدار الشمالي (↑)" aria-pressed="true">↑</button>
+            <button class="btn sm wall-vis-btn active" data-wall="right"  title="الجدار الشرقي (→)" aria-pressed="true">→</button>
+            <button class="btn sm wall-vis-btn active" data-wall="bottom" title="الجدار الجنوبي (↓)" aria-pressed="true">↓</button>
+            <button class="btn sm wall-vis-btn active" data-wall="left"   title="الجدار الغربي (←)" aria-pressed="true">←</button>
+            <button class="btn sm wall-vis-auto active" id="btn-wall-vis-auto" title="إخفاء الجدار الأقرب تلقائياً (مفعّل)" aria-pressed="true">🔄</button>
+          </div>
         </div>
       </div>
 
@@ -126,6 +134,7 @@
         <span>انقر قطعة لاختيارها، اسحبها لتحريكها</span>
         <span>R دوران • D تكرار • Delete حذف</span>
         <span>الزر الأيمن أو Shift+drag لتدوير الكاميرا</span>
+        <span>👁️ أزرار الجدران: أخفِ/أظهر أي جدار أو أوقف الإخفاء التلقائي</span>
       </div>
       <div class="stage-help" id="stage-help-plan" hidden>
         <span>انقر أي غرفة للدخول في وضع التحرير</span>

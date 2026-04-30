@@ -22,50 +22,70 @@ const ROOMS = [
   {
     id: "salon",
     name: "الصالون (Reception)",
-    // New video: light pastel blue walls with one deeper blue accent wall.
-    // Guest/reception side of the open hall.
-    color: "#B8CDE0",
-    wallColor: "#B8CDE0",
+    // New video (new_apartment_video.mp4 @ 00:03-00:08) — deep re-analysis from
+    // 22 extracted frames:
+    //   - Clean rectangular footprint (no protrusion / column).
+    //   - Three light celadon-mint walls + ONE denim-blue accent wall.
+    //   - The accent wall holds a wide WHITE TRIPLE-PANEL FRENCH DOOR with
+    //     louvered shutters — this is the salon's main entrance, facing the
+    //     foyer corridor (kitchen door is opposite across the corridor).
+    //   - Tray ceiling + warm-LED cove + recessed downlights + crown molding.
+    //   - Cream ceramic floor tiles.
+    //   - Exactly ONE window (balcony casement) on the left wall.
+    color: "#BFD6D8",
+    wallColor: "#BFD6D8",
     wallColors: {
-      top:    "#B8CDE0",        // back wall (pastel blue)
-      bottom: "#7BA8C8",        // accent wall (deeper blue) — faces living side
-      left:   "#B8CDE0",        // side wall (pastel blue)
-      right:  "#B8CDE0",        // side wall (pastel blue)
+      top:    "#6892B0",        // accent wall (denim) — holds the French door (faces foyer)
+      bottom: "#BFD6D8",        // mint
+      left:   "#BFD6D8",        // mint (balcony side)
+      right:  "#BFD6D8",        // mint
     },
-    floorColor: "#e8dfd0",
-    description: "جزء الضيوف من الصالة الكبيرة — حائط أزرق مميز وباب بلكونة. يقابل صالة المعيشة.",
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
+    ceiling: { tray: true, cove: true, coveColor: "#FFCE7A", downlights: 8, height: 270 },
+    description: "صالون استقبال الضيوف — حوائط مينت/سيلادون + حائط أزرق ديم يحمل الباب الفرنسي الأبيض ثلاثي البانوهات (يقابل باب المطبخ عبر ممر المدخل)، سقف معلق ساقط بشريط LED أصفر دافئ + سبوتات مدفونة + كورنيش، شباك بلكونة وحيد على الحائط الغربي.",
     plan: { x: 0, y: 0 },
     width: 500,
     depth: 400,
     openings: [
-      { wall: "top",    at: 200, size: 90,  kind: "door",   label: "باب" },
-      { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة (ممر مفتوح)" },
-      { wall: "left",   at: 150, size: 180, kind: "window", label: "بلكونة" },
+      { wall: "top",    at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (يقابل باب المطبخ)" },
+      { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة على المعيشة" },
+      { wall: "left",   at: 150, size: 180, kind: "window", label: "شباك البلكونة" },
     ],
     allowedCategories: ["living", "common"]
   },
   {
     id: "living",
     name: "الصالة المعيشة",
-    // New video: same pastel blue walls, deeper blue accent wall on opposite side.
-    // Living/TV side of the open hall — faces the salon.
-    color: "#B8CDE0",
-    wallColor: "#B8CDE0",
+    // New video (new_apartment_video.mp4 @ 00:13-00:20) — deep re-analysis:
+    //   - Rectangular footprint (no column / protrusion — vertices removed).
+    //   - Multiple denim-blue walls (top + left) + mint side walls.
+    //   - DISTINCTIVE FEATURE: an ornate plaster CEILING ROSE (medallion) at
+    //     the center of the tray drop — set ceiling.rose=true.
+    //   - Tray ceiling + warm-LED cove + recessed downlights + crown molding.
+    //   - One window (white double-shutter casement) on the left wall.
+    //   - Cream ceramic floor tiles.
+    //   - An arched opening on a corner connects to the inner corridor (frames
+    //     15-16, 22) — represented as a wide wall opening on the right wall.
+    color: "#BFD6D8",
+    wallColor: "#BFD6D8",
     wallColors: {
-      top:    "#7BA8C8",        // accent wall (deeper blue) — faces salon side
-      bottom: "#B8CDE0",        // back wall (pastel blue)
-      left:   "#B8CDE0",        // side wall (pastel blue)
-      right:  "#B8CDE0",        // side wall (pastel blue)
+      top:    "#6892B0",        // denim (faces salon — accent)
+      bottom: "#BFD6D8",        // mint (back)
+      left:   "#6892B0",        // denim (balcony / window side — accent)
+      right:  "#BFD6D8",        // mint (corridor / arched opening side)
     },
-    floorColor: "#e8dfd0",
-    description: "جزء المعيشة والتلفزيون من الصالة الكبيرة — يقابل صالة الضيوف.",
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
+    ceiling: { tray: true, cove: true, coveColor: "#FFCE7A", downlights: 8, height: 270, rose: true },
+    description: "صالة المعيشة — حوائط أزرق ديم (شمال + غرب) وحوائط مينت (جنوب + شرق)، سقف معلق ساقط بشريط LED + سبوتات + روزة جبس مزخرفة في المنتصف، شباك واحد على الحائط الغربي، فتحة مقوّسة على الممر الداخلي.",
     plan: { x: 0, y: 410 },
     width: 500,
     depth: 350,
     openings: [
-      { wall: "top",    at: 50,  size: 200, kind: "door",   label: "فتحة (ممر مفتوح)" },
-      { wall: "right",  at: 50,  size: 90,  kind: "door",   label: "باب المطبخ" },
-      { wall: "left",   at: 120, size: 180, kind: "window", label: "بلكونة" },
+      { wall: "top",    at: 50,  size: 200, kind: "door",   label: "فتحة على الصالون" },
+      { wall: "right",  at: 80,  size: 110, kind: "door",   label: "فتحة مقوّسة على الممر" },
+      { wall: "left",   at: 120, size: 130, kind: "window", label: "شباك" },
     ],
     allowedCategories: ["living", "common"]
   },

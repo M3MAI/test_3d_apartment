@@ -125,14 +125,35 @@ function show(container, opts) {
 
   // Floor — use explicit floorColor if defined; otherwise a neutral tile color
   // so the wall color stays distinct from the floor (the old code used
-  // wallColor for both, which made the floor blend into the walls).
-  const floorMat = new THREE.MeshBasicMaterial({
-    color: hexToInt(room.floorColor || "#e6ddcf"),
-  });
-  const floorGeo = new THREE.PlaneGeometry(room.width, room.depth);
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.set(room.width / 2, 0, room.depth / 2);
+  // wallColor for both, which made the floor blend into the walls). When the
+  // room has a custom polygon (room.vertices), the floor follows that shape;
+  // when room.floorTexture === "tile-cream", a procedural tile texture is used.
+  const useTile = room.floorTexture === "tile-cream";
+  const floorMatOpts = useTile
+    ? { map: getTileCreamTexture() }
+    : { color: hexToInt(room.floorColor || "#e6ddcf") };
+  const floorMat = new THREE.MeshBasicMaterial(floorMatOpts);
+  let floor;
+  if (room.vertices && room.vertices.length >= 3) {
+    const fGeo = new THREE.ShapeGeometry(shapeFromVertices(room.vertices));
+    if (useTile) {
+      // Repeat the 256px texture every ~120cm of room space.
+      const tex = floorMat.map;
+      tex.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
+    }
+    floor = new THREE.Mesh(fGeo, floorMat);
+    floor.rotation.x = Math.PI / 2;
+    floor.position.set(0, 0, 0);
+  } else {
+    if (useTile) {
+      const tex = floorMat.map;
+      tex.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
+    }
+    const floorGeo = new THREE.PlaneGeometry(room.width, room.depth);
+    floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(room.width / 2, 0, room.depth / 2);
+  }
   floor.receiveShadow = true;
   floor.name = "room-floor";
   scene.add(floor);
@@ -152,6 +173,9 @@ function show(container, opts) {
   buildWalls(scene, room);
   const wallList = [];
   scene.traverse(o => { if (o.userData && o.userData.wallId) wallList.push(o); });
+
+  // Tray ceiling + cove LED + downlights (room.ceiling flag in rooms.js)
+  const ceilingGroup = buildCeiling(scene, room, /*useStandard*/ false, 0, 0);
 
   // Furniture container (so we never mix up walls/floor with items)
   const furnitureGroup = new THREE.Group();
@@ -200,6 +224,11 @@ function show(container, opts) {
     drag: null,             // pointer drag state
     hoverGhost: null,       // external-drop preview
     selectedInstId: null,
+    // Wall visibility controls — managed externally via setWallVisibility().
+    // manualHidden: ids that user toggled OFF (always hidden until toggled on).
+    // autoHide: when true, also hide whichever wall faces the camera.
+    manualHidden: new Set(opts.initialHidden || []),
+    autoHide: opts.autoHide !== false,
   };
 
   renderItems(ctx, items);
@@ -223,13 +252,28 @@ function show(container, opts) {
     ctx.raf = requestAnimationFrame(loop);
     controls.update();
 
-    // Hide the single wall closest to the camera so we always see inside.
-    const cx = camera.position.x - roomCenter.x;
-    const cz = camera.position.z - roomCenter.z;
-    let hideId;
-    if (Math.abs(cx) >= Math.abs(cz)) hideId = cx >= 0 ? "right" : "left";
-    else                              hideId = cz >= 0 ? "bottom" : "top";
-    wallList.forEach(m => { m.visible = (m.userData.wallId !== hideId); });
+    // Wall visibility: combine manual hides (Set) with optional auto-hide of
+    // whichever wall faces the camera.
+    let autoHideId = null;
+    if (ctx.autoHide) {
+      const cx = camera.position.x - roomCenter.x;
+      const cz = camera.position.z - roomCenter.z;
+      if (Math.abs(cx) >= Math.abs(cz)) autoHideId = cx >= 0 ? "right" : "left";
+      else                              autoHideId = cz >= 0 ? "bottom" : "top";
+    }
+    wallList.forEach(m => {
+      const id = m.userData.wallId;
+      const manual = ctx.manualHidden.has(id);
+      m.visible = !manual && id !== autoHideId;
+    });
+
+    // Hide the ceiling when the camera looks from above (so the user can see
+    // inside the room from the orbit overview). Show it once the camera dips
+    // below ~110% of ceiling height — i.e. when looking horizontally or up.
+    if (ceilingGroup) {
+      const H = wallH(room);
+      ceilingGroup.visible = camera.position.y < H * 1.1;
+    }
 
     // Keep selection outline attached to the currently selected mesh
     if (ctx.selectedInstId) {
@@ -571,8 +615,134 @@ function hexToInt(str) {
 function snap(v) { return Math.round(v / 5) * 5; }
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+// ---------- Polygon helpers ----------
+// Classifies polygon edges into top/bottom/left/right (for openings + textures)
+// or null for inner-protrusion edges. Uses bounding-box alignment.
+function classifyPolygonEdges(verts) {
+  const minX = Math.min(...verts.map(v => v.x));
+  const maxX = Math.max(...verts.map(v => v.x));
+  const minY = Math.min(...verts.map(v => v.y));
+  const maxY = Math.max(...verts.map(v => v.y));
+  const TOL = 1; // cm
+  return verts.map((a, i) => {
+    const b = verts[(i + 1) % verts.length];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const horiz = Math.abs(dy) < 0.5;
+    const vert  = Math.abs(dx) < 0.5;
+    const midY = (a.y + b.y) / 2;
+    const midX = (a.x + b.x) / 2;
+    let dir = null;
+    if      (horiz && Math.abs(midY - minY) < TOL) dir = "top";
+    else if (horiz && Math.abs(midY - maxY) < TOL) dir = "bottom";
+    else if (vert  && Math.abs(midX - minX) < TOL) dir = "left";
+    else if (vert  && Math.abs(midX - maxX) < TOL) dir = "right";
+    return { a, b, dx, dy, len, angle, dir, idx: i };
+  });
+}
+
+// Maps each opening (which references one of top/bottom/left/right) onto the
+// best matching polygon edge whose extent covers the opening range.
+// Returns Map<edgeIdx, opening[]>.
+function assignOpeningsToEdges(edges, openings) {
+  const out = new Map();
+  (openings || []).forEach(op => {
+    const candidates = edges.filter(e => e.dir === op.wall);
+    if (!candidates.length) return;
+    // Prefer the edge whose range fully contains [op.at, op.at+op.size].
+    const isHoriz = (op.wall === "top" || op.wall === "bottom");
+    let best = null;
+    for (const e of candidates) {
+      const lo = isHoriz ? Math.min(e.a.x, e.b.x) : Math.min(e.a.y, e.b.y);
+      const hi = isHoriz ? Math.max(e.a.x, e.b.x) : Math.max(e.a.y, e.b.y);
+      if (op.at >= lo - 0.5 && (op.at + op.size) <= hi + 0.5) { best = e; break; }
+    }
+    if (!best) {
+      // Fallback: pick the longest candidate (opening will be clipped).
+      best = candidates.reduce((p, c) => c.len > p.len ? c : p);
+    }
+    if (!out.has(best.idx)) out.set(best.idx, []);
+    out.get(best.idx).push(op);
+  });
+  return out;
+}
+
+// Converts an opening's [at, at+size] in wall-frame coords to local edge coords
+// (where local x runs from edge.a along the edge direction).
+function openingToLocalEdgeRange(op, edge) {
+  const isHoriz = (op.wall === "top" || op.wall === "bottom");
+  const sign = isHoriz ? (edge.b.x > edge.a.x ? 1 : -1)
+                       : (edge.b.y > edge.a.y ? 1 : -1);
+  const startCoord = isHoriz ? edge.a.x : edge.a.y;
+  const lx1 = (op.at - startCoord) * sign;
+  const lx2 = (op.at + op.size - startCoord) * sign;
+  let lo = Math.min(lx1, lx2);
+  let hi = Math.max(lx1, lx2);
+  if (hi <= 0 || lo >= edge.len) return null; // doesn't fall on this edge
+  lo = Math.max(0, lo);
+  hi = Math.min(edge.len, hi);
+  return [lo, hi];
+}
+
+// Polygon room footprint helpers — used both for walls iteration and ceiling.
+function getRoomEdges(room) {
+  if (room.vertices && room.vertices.length >= 3) {
+    return classifyPolygonEdges(room.vertices);
+  }
+  // Fallback: rectangular 4 edges (CCW).
+  const w = room.width, d = room.depth;
+  return classifyPolygonEdges([
+    { x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }
+  ]);
+}
+
+// Builds a tile-cream procedural texture (large beige ceramic tiles with grout
+// lines). Cached so we don't rebuild per call.
+let _tileCreamTexture = null;
+function getTileCreamTexture() {
+  if (_tileCreamTexture) return _tileCreamTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256; canvas.height = 256;
+  const ctx2 = canvas.getContext("2d");
+  ctx2.fillStyle = "#e6d9c2";
+  ctx2.fillRect(0, 0, 256, 256);
+  // Subtle speckle
+  for (let i = 0; i < 800; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256;
+    const a = 0.04 + Math.random() * 0.06;
+    ctx2.fillStyle = `rgba(180,160,120,${a})`;
+    ctx2.fillRect(x, y, 1, 1);
+  }
+  // Grout lines (4 tiles per texture)
+  ctx2.strokeStyle = "#c8b896";
+  ctx2.lineWidth = 2;
+  ctx2.beginPath();
+  ctx2.moveTo(128, 0); ctx2.lineTo(128, 256);
+  ctx2.moveTo(0, 128); ctx2.lineTo(256, 128);
+  ctx2.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _tileCreamTexture = tex;
+  return tex;
+}
+
+// Builds a Shape from polygon vertices (in cm).
+function shapeFromVertices(verts) {
+  const shape = new THREE.Shape();
+  shape.moveTo(verts[0].x, verts[0].y);
+  for (let i = 1; i < verts.length; i++) shape.lineTo(verts[i].x, verts[i].y);
+  shape.lineTo(verts[0].x, verts[0].y);
+  return shape;
+}
+
 // ---------- Walls ----------
 function buildWalls(scene, room) {
+  if (room.vertices && room.vertices.length >= 3) {
+    return buildWallsFromVertices(scene, room, /*useStandard*/ false);
+  }
   const t = WALL_THICK_3D;
   const walls = [
     { length: room.width, anchor: [0, 0, 0],                    axis: "x", wall: "top" },
@@ -642,6 +812,343 @@ function buildWalls(scene, room) {
     mesh.userData.wallId = w.wall;
     scene.add(mesh);
   });
+  // Crown molding (only when ceiling is configured for this room)
+  if (room.ceiling) buildCrownMolding(scene, room, /*useStandard*/ false, 0, 0);
+}
+
+// Polygon-aware wall builder. For each polygon edge, builds a wall mesh whose
+// local +X runs from edge.a to edge.b, with proper opening cutouts.
+// useStandard: true -> MeshStandardMaterial (apartment overview),
+//              false -> MeshBasicMaterial (single-room view, exact colors).
+// offX/offZ: world offset (used by buildRoomAt for the apartment scene).
+function buildWallsFromVertices(scene, room, useStandard, offX, offZ, collidables) {
+  const t = WALL_THICK_3D;
+  const H = wallH(room);
+  const ox = offX || 0, oz = offZ || 0;
+  const edges = classifyPolygonEdges(room.vertices);
+  const opMap = assignOpeningsToEdges(edges, room.openings);
+
+  edges.forEach(e => {
+    const wallHex = (typeof resolveWallColor === "function")
+      ? resolveWallColor(room, e.dir || "top")
+      : (room.wallColor || "#eeeeee");
+    const colorInt = useStandard
+      ? lighter(hexToInt(wallHex), e.dir && room.accentWall === e.dir && room.accentColor ? 0.0 : 0.15)
+      : hexToInt(wallHex);
+    const matOpts = useStandard
+      ? { color: colorInt, roughness: 0.9, side: THREE.DoubleSide }
+      : { color: colorInt, side: THREE.DoubleSide };
+    const wallTextures = room.wallTextures || {};
+    if (e.dir && wallTextures[e.dir]) {
+      try {
+        const tex = new THREE.TextureLoader().load(wallTextures[e.dir]);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        matOpts.map = tex;
+        matOpts.color = 0xffffff;
+      } catch (_) { /* keep flat color */ }
+    }
+    const mat = useStandard
+      ? new THREE.MeshStandardMaterial(matOpts)
+      : new THREE.MeshBasicMaterial(matOpts);
+
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(e.len, 0);
+    shape.lineTo(e.len, H);
+    shape.lineTo(0, H);
+    shape.lineTo(0, 0);
+
+    const holes = [];
+    (opMap.get(e.idx) || []).forEach(op => {
+      const range = openingToLocalEdgeRange(op, e);
+      if (!range) return;
+      const [lo, hi] = range;
+      const y0 = op.kind === "door" ? 0 : 90;
+      const y1 = op.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
+      const hole = new THREE.Path();
+      hole.moveTo(lo, y0);
+      hole.lineTo(hi, y0);
+      hole.lineTo(hi, y1);
+      hole.lineTo(lo, y1);
+      hole.lineTo(lo, y0);
+      holes.push(hole);
+    });
+    shape.holes = holes;
+
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set(ox + e.a.x, 0, oz + e.a.y);
+    mesh.rotation.y = -e.angle;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.wallId = e.dir || `inner_${e.idx}`;
+    if (room.id) mesh.userData.roomId = room.id;
+    scene.add(mesh);
+    if (collidables) collidables.push(mesh);
+  });
+
+  if (room.ceiling) buildCrownMolding(scene, room, useStandard, ox, oz);
+}
+
+// White crown molding (8cm tall) along the top inner edge of every wall.
+function buildCrownMolding(scene, room, useStandard, ox, oz) {
+  const H = wallH(room);
+  const edges = getRoomEdges(room);
+  const matOpts = { color: 0xffffff };
+  const mat = useStandard
+    ? new THREE.MeshStandardMaterial({ ...matOpts, roughness: 0.7 })
+    : new THREE.MeshBasicMaterial(matOpts);
+  edges.forEach(e => {
+    if (e.len < 5) return;
+    const geom = new THREE.BoxGeometry(e.len, 8, 5);
+    const mesh = new THREE.Mesh(geom, mat);
+    // Center the crown along the edge, 4cm below ceiling, 2.5cm into the room
+    const dxN = -Math.sin(e.angle); // inward normal (CCW polygon → left of edge)
+    const dyN =  Math.cos(e.angle);
+    const cx = ox + (e.a.x + e.b.x) / 2 + dxN * 2.5;
+    const cz = oz + (e.a.y + e.b.y) / 2 + dyN * 2.5;
+    mesh.position.set(cx, H - 4, cz);
+    mesh.rotation.y = -e.angle;
+    mesh.userData.ceilingPart = true;
+    mesh.userData.roomId = room.id;
+    scene.add(mesh);
+  });
+}
+
+// Builds a tray ceiling + cove LED + recessed downlights for the room.
+// Activated when room.ceiling is truthy. Group is tagged with userData.ceiling
+// so the camera-hide logic can fade it when the camera is near eye-height.
+function buildCeiling(scene, room, useStandard, offX, offZ) {
+  if (!room.ceiling) return null;
+  const ox = offX || 0, oz = offZ || 0;
+  const H = wallH(room);
+  const cfg = (typeof room.ceiling === "object") ? room.ceiling : {};
+  const coveColor = cfg.coveColor || "#FFD27A";
+  const downlights = Math.max(0, cfg.downlights | 0 || 6);
+
+  const group = new THREE.Group();
+  group.name = "ceiling";
+  group.userData.ceilingPart = true;
+  group.userData.roomId = room.id;
+
+  // Main flat ceiling (white) — uses ShapeGeometry over the polygon footprint.
+  const verts = room.vertices && room.vertices.length >= 3
+    ? room.vertices
+    : [{ x: 0, y: 0 }, { x: room.width, y: 0 },
+       { x: room.width, y: room.depth }, { x: 0, y: room.depth }];
+  const ceilShape = shapeFromVertices(verts);
+  const ceilGeom = new THREE.ShapeGeometry(ceilShape);
+  const ceilMat = useStandard
+    ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, side: THREE.DoubleSide })
+    : new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const ceilMesh = new THREE.Mesh(ceilGeom, ceilMat);
+  ceilMesh.rotation.x = Math.PI / 2;
+  ceilMesh.position.set(ox, H, oz);
+  group.add(ceilMesh);
+
+  // Tray drop — a rectangle inset 60cm from the bounding box, 25cm below the
+  // main ceiling to form the visible drop.
+  const minX = Math.min(...verts.map(v => v.x));
+  const maxX = Math.max(...verts.map(v => v.x));
+  const minY = Math.min(...verts.map(v => v.y));
+  const maxY = Math.max(...verts.map(v => v.y));
+  const inset = 60;
+  const tx0 = minX + inset, tx1 = maxX - inset;
+  const ty0 = minY + inset, ty1 = maxY - inset;
+  const trayW = Math.max(50, tx1 - tx0);
+  const trayD = Math.max(50, ty1 - ty0);
+  const trayDrop = 25; // cm
+  const trayY = H - trayDrop;
+
+  if (cfg.tray) {
+    // Tray bottom (visible white surface)
+    const trayGeom = new THREE.PlaneGeometry(trayW, trayD);
+    const trayMat = useStandard
+      ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const trayMesh = new THREE.Mesh(trayGeom, trayMat);
+    trayMesh.rotation.x = Math.PI / 2;
+    trayMesh.position.set(ox + (tx0 + tx1) / 2, trayY, oz + (ty0 + ty1) / 2);
+    group.add(trayMesh);
+
+    // Tray side strips (4) connecting trayY to H — gives the visible drop edge
+    const sideMat = useStandard
+      ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const sides = [
+      { w: trayW, x: ox + (tx0 + tx1) / 2, z: oz + ty0, ry: 0          },
+      { w: trayW, x: ox + (tx0 + tx1) / 2, z: oz + ty1, ry: Math.PI    },
+      { w: trayD, x: ox + tx0, z: oz + (ty0 + ty1) / 2, ry: -Math.PI/2 },
+      { w: trayD, x: ox + tx1, z: oz + (ty0 + ty1) / 2, ry:  Math.PI/2 },
+    ];
+    sides.forEach(s => {
+      const g = new THREE.PlaneGeometry(s.w, trayDrop);
+      const m = new THREE.Mesh(g, sideMat);
+      m.position.set(s.x, trayY + trayDrop / 2, s.z);
+      m.rotation.y = s.ry;
+      group.add(m);
+    });
+  }
+
+  if (cfg.cove) {
+    // Cove LED strips: 4 thin self-illuminated planes on the perimeter of the
+    // tray drop, lying flat just below the main ceiling, glowing inwards.
+    const coveMat = new THREE.MeshBasicMaterial({
+      color: hexToInt(coveColor),
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const stripW = 6; // cm
+    const coveY = H - 1;
+    const strips = [
+      { w: trayW + stripW * 2, d: stripW, x: ox + (tx0 + tx1) / 2, z: oz + ty0 - stripW / 2 },
+      { w: trayW + stripW * 2, d: stripW, x: ox + (tx0 + tx1) / 2, z: oz + ty1 + stripW / 2 },
+      { w: stripW, d: trayD, x: ox + tx0 - stripW / 2, z: oz + (ty0 + ty1) / 2 },
+      { w: stripW, d: trayD, x: ox + tx1 + stripW / 2, z: oz + (ty0 + ty1) / 2 },
+    ];
+    strips.forEach(s => {
+      const g = new THREE.PlaneGeometry(s.w, s.d);
+      const m = new THREE.Mesh(g, coveMat);
+      m.rotation.x = Math.PI / 2;
+      m.position.set(s.x, coveY, s.z);
+      group.add(m);
+    });
+    // Soft uplight bouncing off main ceiling — only when standard materials
+    // are in use (basic materials ignore lights anyway).
+    if (useStandard) {
+      const pl = new THREE.PointLight(hexToInt(coveColor), 0.45, Math.max(trayW, trayD) * 1.5);
+      pl.position.set(ox + (tx0 + tx1) / 2, H - 5, oz + (ty0 + ty1) / 2);
+      group.add(pl);
+    }
+  }
+
+  if (downlights > 0 && cfg.tray) {
+    // Distribute `downlights` evenly around the tray perimeter.
+    const perim = 2 * (trayW + trayD);
+    const spacing = perim / downlights;
+    const dlMat = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
+    for (let i = 0; i < downlights; i++) {
+      let s = (i + 0.5) * spacing;
+      let lx, lz;
+      if (s < trayW) { lx = tx0 + s; lz = ty0 + 8; }
+      else if (s < trayW + trayD) { lx = tx1 - 8; lz = ty0 + (s - trayW); }
+      else if (s < trayW * 2 + trayD) { lx = tx1 - (s - trayW - trayD); lz = ty1 - 8; }
+      else { lx = tx0 + 8; lz = ty1 - (s - trayW * 2 - trayD); }
+      const g = new THREE.CircleGeometry(5, 16);
+      const m = new THREE.Mesh(g, dlMat);
+      m.rotation.x = Math.PI / 2;
+      m.position.set(ox + lx, trayY - 0.5, oz + lz);
+      group.add(m);
+      if (useStandard) {
+        const sp = new THREE.SpotLight(0xffffff, 0.35, 400, Math.PI / 5, 0.4, 1.2);
+        sp.position.set(ox + lx, trayY - 1, oz + lz);
+        sp.target.position.set(ox + lx, 0, oz + lz);
+        group.add(sp);
+        group.add(sp.target);
+      }
+    }
+  }
+
+  // Ornate ceiling rose / medallion (a round plaster rosette) at the center of
+  // the tray drop. Used in formal rooms (e.g. living room in the new video).
+  if (cfg.rose && cfg.tray) {
+    const roseTex = getCeilingRoseTexture();
+    const roseR = Math.min(trayW, trayD) * 0.22; // 22% of the smaller tray side
+    const roseGeom = new THREE.CircleGeometry(roseR, 64);
+    const roseMat = useStandard
+      ? new THREE.MeshStandardMaterial({ map: roseTex, roughness: 0.7, transparent: true, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ map: roseTex, transparent: true, side: THREE.DoubleSide });
+    const roseMesh = new THREE.Mesh(roseGeom, roseMat);
+    roseMesh.rotation.x = Math.PI / 2;
+    roseMesh.position.set(ox + (tx0 + tx1) / 2, trayY - 0.6, oz + (ty0 + ty1) / 2);
+    group.add(roseMesh);
+
+    // A small chandelier hook (visible black point at the rose center).
+    const hookGeom = new THREE.SphereGeometry(2.5, 12, 8);
+    const hookMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+    const hookMesh = new THREE.Mesh(hookGeom, hookMat);
+    hookMesh.position.set(ox + (tx0 + tx1) / 2, trayY - 4, oz + (ty0 + ty1) / 2);
+    group.add(hookMesh);
+  }
+
+  scene.add(group);
+  return group;
+}
+
+// Procedural ornate ceiling-rose texture: concentric rings + radial flutes,
+// drawn on a transparent canvas so it can be overlaid on the tray drop.
+let _ceilingRoseTexture = null;
+function getCeilingRoseTexture() {
+  if (_ceilingRoseTexture) return _ceilingRoseTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 512; canvas.height = 512;
+  const c = canvas.getContext("2d");
+  const cx = 256, cy = 256;
+  c.clearRect(0, 0, 512, 512);
+  // Outer ring (subtle rim shadow)
+  c.beginPath();
+  c.arc(cx, cy, 240, 0, Math.PI * 2);
+  c.fillStyle = "rgba(255,255,255,0.96)";
+  c.fill();
+  c.strokeStyle = "rgba(120,110,90,0.35)";
+  c.lineWidth = 3;
+  c.stroke();
+  // Concentric decorative bands
+  const bands = [
+    { r: 220, color: "rgba(140,125,95,0.25)", lw: 2 },
+    { r: 195, color: "rgba(150,135,100,0.30)", lw: 4 },
+    { r: 160, color: "rgba(120,105,80,0.30)", lw: 2 },
+    { r: 130, color: "rgba(150,135,100,0.35)", lw: 3 },
+    { r: 95,  color: "rgba(120,105,80,0.30)", lw: 2 },
+    { r: 65,  color: "rgba(150,135,100,0.40)", lw: 3 },
+    { r: 35,  color: "rgba(120,105,80,0.45)", lw: 2 },
+  ];
+  bands.forEach(b => {
+    c.beginPath();
+    c.arc(cx, cy, b.r, 0, Math.PI * 2);
+    c.strokeStyle = b.color;
+    c.lineWidth = b.lw;
+    c.stroke();
+  });
+  // Radial flutes between r=130 and r=200
+  const flutes = 24;
+  for (let i = 0; i < flutes; i++) {
+    const a = (i / flutes) * Math.PI * 2;
+    const r1 = 132, r2 = 195;
+    c.beginPath();
+    c.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    c.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    c.strokeStyle = "rgba(110,95,75,0.35)";
+    c.lineWidth = 1.5;
+    c.stroke();
+  }
+  // Small petals around r=80
+  const petals = 12;
+  for (let i = 0; i < petals; i++) {
+    const a = (i / petals) * Math.PI * 2;
+    const px = cx + Math.cos(a) * 80;
+    const py = cy + Math.sin(a) * 80;
+    c.beginPath();
+    c.arc(px, py, 8, 0, Math.PI * 2);
+    c.fillStyle = "rgba(170,150,115,0.55)";
+    c.fill();
+    c.strokeStyle = "rgba(110,95,75,0.55)";
+    c.lineWidth = 1;
+    c.stroke();
+  }
+  // Center boss
+  c.beginPath();
+  c.arc(cx, cy, 18, 0, Math.PI * 2);
+  c.fillStyle = "rgba(180,160,125,0.7)";
+  c.fill();
+  c.strokeStyle = "rgba(110,95,75,0.6)";
+  c.lineWidth = 1.5;
+  c.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _ceilingRoseTexture = tex;
+  return tex;
 }
 
 function lighter(colorInt, amount) {
@@ -909,6 +1416,31 @@ function updateApartmentItems(itemsByRoom, findItem) {
 
 // Build a room (walls + openings) with an offset into a shared scene.
 function buildRoomAt(scene, room, offX, offZ, collidables) {
+  // Polygon path: room.vertices defines a custom footprint with protrusions.
+  if (room.vertices && room.vertices.length >= 3) {
+    buildWallsFromVertices(scene, room, /*useStandard*/ true, offX, offZ, collidables);
+    // Polygon-shaped floor
+    const useTile = room.floorTexture === "tile-cream";
+    const fMat = useTile
+      ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(), roughness: 0.95 })
+      : new THREE.MeshStandardMaterial({
+          color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
+          roughness: 0.95,
+        });
+    if (useTile) {
+      fMat.map.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
+    }
+    const fGeo = new THREE.ShapeGeometry(shapeFromVertices(room.vertices));
+    const fMesh = new THREE.Mesh(fGeo, fMat);
+    fMesh.rotation.x = Math.PI / 2;
+    fMesh.position.set(offX, 0.5, offZ);
+    fMesh.receiveShadow = true;
+    scene.add(fMesh);
+    // Tray ceiling + cove + downlights for rooms that opt-in
+    buildCeiling(scene, room, /*useStandard*/ true, offX, offZ);
+    return;
+  }
+
   const t = WALL_THICK_3D;
   const walls = [
     { length: room.width, anchor: [offX, 0, offZ],                          axis: "x", wall: "top" },
@@ -963,18 +1495,29 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     if (collidables) collidables.push(mesh);
   });
 
-  // Floor tile for this room — uses floorColor if defined, otherwise a tinted
-  // mix of wallColor so room boundaries stay readable in the plan overview.
-  const fMat = new THREE.MeshStandardMaterial({
-    color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
-    roughness: 0.95,
-  });
+  // Crown molding (rectangular path) — only when ceiling is configured.
+  if (room.ceiling) buildCrownMolding(scene, room, /*useStandard*/ true, offX, offZ);
+
+  // Floor tile for this room — uses floorColor or tile-cream texture.
+  const useTile = room.floorTexture === "tile-cream";
+  const fMat = useTile
+    ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(), roughness: 0.95 })
+    : new THREE.MeshStandardMaterial({
+        color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
+        roughness: 0.95,
+      });
+  if (useTile) {
+    fMat.map.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
+  }
   const fGeo = new THREE.PlaneGeometry(room.width, room.depth);
   const fMesh = new THREE.Mesh(fGeo, fMat);
   fMesh.rotation.x = -Math.PI / 2;
   fMesh.position.set(offX + room.width / 2, 0.5, offZ + room.depth / 2);
   fMesh.receiveShadow = true;
   scene.add(fMesh);
+
+  // Tray ceiling + cove + downlights — rectangular path.
+  buildCeiling(scene, room, /*useStandard*/ true, offX, offZ);
 }
 
 // ============================================================
@@ -1032,8 +1575,29 @@ function setSunHour(hour) {
   }
 }
 
+// Wall visibility controls (single-room 3D view only).
+// wallId is one of "top" | "bottom" | "left" | "right".
+// `visible: true` removes any manual hide and lets auto-hide take over.
+function setWallVisibility(wallId, visible) {
+  if (!ctx) return;
+  if (visible) ctx.manualHidden.delete(wallId);
+  else         ctx.manualHidden.add(wallId);
+}
+function setAutoHideWalls(enabled) {
+  if (!ctx) return;
+  ctx.autoHide = !!enabled;
+}
+function getWallVisibilityState() {
+  if (!ctx) return null;
+  const all = ["top", "right", "bottom", "left"];
+  const visible = {};
+  all.forEach(id => { visible[id] = !ctx.manualHidden.has(id); });
+  return { visible, autoHide: ctx.autoHide };
+}
+
 window.AptThreeView = {
   show, hide, hideRoomOnly, updateItems, setSelection, isActiveFor, screenToRoomCoords,
   showApartment, isActiveApartment, updateApartmentItems, hideApartment,
   screenshotPNG, exportGLB, setSunHour,
+  setWallVisibility, setAutoHideWalls, getWallVisibilityState,
 };

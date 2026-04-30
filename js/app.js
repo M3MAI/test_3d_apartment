@@ -515,7 +515,88 @@ function bindViewModeToggle() {
   document.getElementById("btn-mode-2d").addEventListener("click", () => setViewMode("2d"));
   document.getElementById("btn-mode-3d").addEventListener("click", () => setViewMode("3d"));
   document.getElementById("btn-mode-walk").addEventListener("click", () => setViewMode("walk"));
+  bindWallVisibilityToggle();
 }
+
+// ---------- 3D wall-visibility toggle ----------
+// Per-room hidden walls are persisted in localStorage so the user's choice
+// sticks across reloads and room switches.
+const WALL_HIDDEN_KEY = "apt:wall-hidden:v1";
+const WALL_AUTOHIDE_KEY = "apt:wall-autohide:v1";
+
+function loadWallHiddenMap() {
+  try { return JSON.parse(localStorage.getItem(WALL_HIDDEN_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function saveWallHiddenMap(map) {
+  try { localStorage.setItem(WALL_HIDDEN_KEY, JSON.stringify(map)); } catch (_) {}
+}
+function getRoomHiddenWalls(roomId) {
+  const map = loadWallHiddenMap();
+  return Array.isArray(map[roomId]) ? map[roomId] : [];
+}
+function setRoomHiddenWalls(roomId, list) {
+  const map = loadWallHiddenMap();
+  if (list && list.length) map[roomId] = list;
+  else delete map[roomId];
+  saveWallHiddenMap(map);
+}
+function getAutoHidePref() {
+  return localStorage.getItem(WALL_AUTOHIDE_KEY) !== "0";
+}
+function setAutoHidePref(enabled) {
+  localStorage.setItem(WALL_AUTOHIDE_KEY, enabled ? "1" : "0");
+}
+
+function bindWallVisibilityToggle() {
+  document.querySelectorAll(".wall-visibility .wall-vis-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const wall = btn.dataset.wall;
+      const willShow = !btn.classList.contains("active");
+      btn.classList.toggle("active", willShow);
+      btn.setAttribute("aria-pressed", willShow ? "true" : "false");
+      if (window.AptThreeView && window.AptThreeView.setWallVisibility) {
+        window.AptThreeView.setWallVisibility(wall, willShow);
+      }
+      // Persist per-room
+      if (state.activeRoomId) {
+        const hidden = Array.from(document.querySelectorAll(".wall-visibility .wall-vis-btn"))
+          .filter(b => !b.classList.contains("active")).map(b => b.dataset.wall);
+        setRoomHiddenWalls(state.activeRoomId, hidden);
+      }
+    });
+  });
+  const autoBtn = document.getElementById("btn-wall-vis-auto");
+  if (autoBtn) {
+    autoBtn.addEventListener("click", () => {
+      const willEnable = !autoBtn.classList.contains("active");
+      autoBtn.classList.toggle("active", willEnable);
+      autoBtn.setAttribute("aria-pressed", willEnable ? "true" : "false");
+      autoBtn.title = willEnable
+        ? "إخفاء الجدار الأقرب تلقائياً (مفعّل) — اضغط للإيقاف"
+        : "الإخفاء التلقائي متوقف — اضغط لإعادة التفعيل";
+      setAutoHidePref(willEnable);
+      if (window.AptThreeView && window.AptThreeView.setAutoHideWalls) {
+        window.AptThreeView.setAutoHideWalls(willEnable);
+      }
+    });
+    autoBtn.classList.toggle("active", getAutoHidePref());
+  }
+}
+
+// Refresh the toggle UI to reflect the active room's stored state.
+function refreshWallVisibilityUI() {
+  const hidden = state.activeRoomId ? getRoomHiddenWalls(state.activeRoomId) : [];
+  const hSet = new Set(hidden);
+  document.querySelectorAll(".wall-visibility .wall-vis-btn").forEach(btn => {
+    const visible = !hSet.has(btn.dataset.wall);
+    btn.classList.toggle("active", visible);
+    btn.setAttribute("aria-pressed", visible ? "true" : "false");
+  });
+  const autoBtn = document.getElementById("btn-wall-vis-auto");
+  if (autoBtn) autoBtn.classList.toggle("active", getAutoHidePref());
+}
+
 function setViewMode(mode) {
   if (mode === state.viewMode) return;
   state.viewMode = mode;
@@ -534,6 +615,12 @@ function setViewMode(mode) {
     const el = document.getElementById(id);
     if (el) el.disabled = (mode !== "2d" && mode !== "plan");
   });
+  // Show wall-visibility group only in single-room 3D mode.
+  const wallVis = document.querySelector(".wall-visibility");
+  const wallSep = document.querySelector(".wall-sep");
+  if (wallVis) wallVis.hidden = (mode !== "3d");
+  if (wallSep) wallSep.hidden = (mode !== "3d");
+  if (mode === "3d") refreshWallVisibilityUI();
   drawRoom();
 }
 
@@ -674,10 +761,13 @@ function drawRoom() {
     // place (keeps camera & selection smooth across edits). Otherwise, build.
     if (window.AptThreeView.isActiveFor(room.id)) {
       window.AptThreeView.updateItems(items, findItem, state.selectedInstId, collisions, blocked);
+      refreshWallVisibilityUI();
     } else {
       container.innerHTML = `<div class="three-wrap" id="three-wrap"></div>`;
       window.AptThreeView.show(document.getElementById("three-wrap"), {
         room, items, findItem, collisionSet: collisions, blockedSet: blocked,
+        initialHidden: getRoomHiddenWalls(room.id),
+        autoHide: getAutoHidePref(),
         onSelect: (instId) => {
           state.selectedInstId = instId;
           renderSelection();
@@ -704,6 +794,7 @@ function drawRoom() {
           window.AptThreeView.updateItems(nextItems, findItem, state.selectedInstId, nextCollisions, nextBlocked);
         },
       });
+      refreshWallVisibilityUI();
     }
     return;
   }
