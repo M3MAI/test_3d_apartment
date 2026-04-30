@@ -232,48 +232,14 @@
           </label>
         </div>
         <h4 class="field-label">ألوان الجدران <button class="btn sm ghost" id="re-wall-apply-all" title="تطبيق لون الشمال على الكل" style="margin-right:8px;font-size:11px">← نسخ للكل</button></h4>
-        <div class="wall-color-grid">
-          <label class="wall-color-item" title="الحائط الشمالي (أعلى)">
-            <span>↑ شمال</span>
-            <input type="color" id="re-wall-top" />
-            <div style="display:flex;gap:4px">
-              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-top" title="صورة للحائط">📷</button>
-              <button class="btn sm ghost wall-eyedropper-btn" data-wall="top" title="اختيار لون من صورة">🔍</button>
-            </div>
-            <input type="file" id="re-wall-photo-input-top" accept="image/*" hidden />
-            <img id="re-wall-photo-preview-top" class="wall-photo-preview" hidden />
-          </label>
-          <label class="wall-color-item" title="الحائط الجنوبي (أسفل)">
-            <span>↓ جنوب</span>
-            <input type="color" id="re-wall-bottom" />
-            <div style="display:flex;gap:4px">
-              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-bottom" title="صورة للحائط">📷</button>
-              <button class="btn sm ghost wall-eyedropper-btn" data-wall="bottom" title="اختيار لون من صورة">🔍</button>
-            </div>
-            <input type="file" id="re-wall-photo-input-bottom" accept="image/*" hidden />
-            <img id="re-wall-photo-preview-bottom" class="wall-photo-preview" hidden />
-          </label>
-          <label class="wall-color-item" title="الحائط الشرقي (يمين)">
-            <span>→ شرق</span>
-            <input type="color" id="re-wall-right" />
-            <div style="display:flex;gap:4px">
-              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-right" title="صورة للحائط">📷</button>
-              <button class="btn sm ghost wall-eyedropper-btn" data-wall="right" title="اختيار لون من صورة">🔍</button>
-            </div>
-            <input type="file" id="re-wall-photo-input-right" accept="image/*" hidden />
-            <img id="re-wall-photo-preview-right" class="wall-photo-preview" hidden />
-          </label>
-          <label class="wall-color-item" title="الحائط الغربي (يسار)">
-            <span>← غرب</span>
-            <input type="color" id="re-wall-left" />
-            <div style="display:flex;gap:4px">
-              <button class="btn sm ghost wall-photo-btn" id="re-wall-photo-left" title="صورة للحائط">📷</button>
-              <button class="btn sm ghost wall-eyedropper-btn" data-wall="left" title="اختيار لون من صورة">🔍</button>
-            </div>
-            <input type="file" id="re-wall-photo-input-left" accept="image/*" hidden />
-            <img id="re-wall-photo-preview-left" class="wall-photo-preview" hidden />
-          </label>
+        <div class="wall-color-grid" id="re-wall-color-grid">
+          <!-- Wall control items are rendered dynamically by WallPhoto.init() to
+               keep all 4 walls in sync (color picker + photo upload + fit
+               mode + tile counts + brightness/contrast + remove/apply-to-all). -->
         </div>
+        <p class="hint wall-photo-hint" id="re-wall-photo-hint">
+          اسحب صورة على المعاينة، أو انقر 📷 للرفع. يمكنك أيضاً لصق صورة من الحافظة (Ctrl+V).
+        </p>
         <div class="fields-row">
           <label class="field">
             <span>العرض W <small>(سم)</small></span>
