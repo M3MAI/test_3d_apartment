@@ -113,12 +113,9 @@
       e.preventDefault();
       fileInput.click();
     });
-    root.querySelector('[data-action="eyedropper"]').addEventListener("click", e => {
-      e.preventDefault();
-      // Eyedropper is wired in app.js via .wall-eyedropper-btn (queried globally).
-      // Forward the click so the existing handler triggers.
-      if (typeof opts.onEyedropper === "function") opts.onEyedropper(wallId);
-    });
+    // The eyedropper button has class .wall-eyedropper-btn — its click
+    // handler is registered globally by bindEyedropperButtons() in app.js.
+    // We deliberately do NOT bind it here to avoid double-firing.
     clearBtn.addEventListener("click", e => {
       e.preventDefault();
       setPhoto(wallId, null);

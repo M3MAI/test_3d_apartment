@@ -103,6 +103,21 @@ function loadRoomOverrides() {
 function saveRoomOverrides(obj) {
   try { localStorage.setItem(ROOM_OVERRIDES_KEY, JSON.stringify(obj)); } catch {}
 }
+// Save with quota-exceeded guard. Returns true on success, false (and toasts
+// the user) when localStorage rejects the payload — typically because the
+// total of wall photos exceeded ~5MB.
+function persistRoomOverridesSafely(obj) {
+  try {
+    localStorage.setItem(ROOM_OVERRIDES_KEY, JSON.stringify(obj));
+    return true;
+  } catch (e) {
+    const msg = (e && e.name === "QuotaExceededError")
+      ? "ذاكرة المتصفح ممتلئة — تخفيض جودة الصور أو إزالة بعض صور الجدران ثم المحاولة مرة أخرى."
+      : "تعذّر الحفظ. حاول إزالة صور الجدران ثم الحفظ مجدداً.";
+    if (typeof toast === "function") toast(msg, "err", 6000);
+    return false;
+  }
+}
 // Apply overrides in-place to ROOMS at init (keeps the rest of the app oblivious).
 function applyRoomOverrides() {
   const ov = loadRoomOverrides();
@@ -124,6 +139,7 @@ function applyRoomOverrides() {
     if (o.floorTexture) r.floorTexture = o.floorTexture;
     if (o.wallTexture)  r.wallTexture  = o.wallTexture;
     if (o.wallTextures) r.wallTextures = o.wallTextures;
+    if (o.wallTextureSettings) r.wallTextureSettings = o.wallTextureSettings;
     if (o.vertices && Array.isArray(o.vertices)) r.vertices = o.vertices;
   });
 }
@@ -166,6 +182,14 @@ document.addEventListener("DOMContentLoaded", () => {
   bindCostModal();
   bindWallPhotoUploads();
   bindEyedropperButtons();
+  // New richer wall-photo controller (drag/drop, paste, fit modes, brightness,
+  // contrast, apply-to-all, remove). It builds the .wall-color-grid items
+  // dynamically — eyedropper buttons must be (re)bound AFTER init so they
+  // pick up the freshly rendered DOM nodes.
+  if (window.WallPhoto) {
+    window.WallPhoto.init({});
+    bindEyedropperButtons();
+  }
   bindOnboarding();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
@@ -1056,6 +1080,18 @@ function renderRoomShell(room) {
   parts.push(`<rect x="${px}" y="${py + h - stripe}" width="${w}" height="${stripe}" fill="${safeColor(getWC('bottom'), '#ccc')}" opacity="0.85" rx="2" />`);
   parts.push(`<rect x="${px}" y="${py}" width="${stripe}" height="${h}" fill="${safeColor(getWC('left'), '#ccc')}" opacity="0.85" rx="2" />`);
   parts.push(`<rect x="${px + w - stripe}" y="${py}" width="${stripe}" height="${h}" fill="${safeColor(getWC('right'), '#ccc')}" opacity="0.85" rx="2" />`);
+
+  // Wall-photo indicator: small camera badge on any wall that has an uploaded
+  // photo (so users see at-a-glance which walls are textured in 2D too).
+  const wt = room.wallTextures || {};
+  const badge = (cx, cy, wid) => `<g class="wall-photo-badge" data-wall="${wid}" transform="translate(${cx} ${cy})">
+    <circle r="9" fill="rgba(255,255,255,0.95)" stroke="#6892b0" stroke-width="1" />
+    <text y="4" text-anchor="middle" font-size="11">📷</text>
+  </g>`;
+  if (wt.top)    parts.push(badge(px + w / 2, py + 5, "top"));
+  if (wt.bottom) parts.push(badge(px + w / 2, py + h - 5, "bottom"));
+  if (wt.left)   parts.push(badge(px + 5, py + h / 2, "left"));
+  if (wt.right)  parts.push(badge(px + w - 5, py + h / 2, "right"));
 
   let grid = "";
   for (let gx = 50; gx < w; gx += 50) {
@@ -2206,6 +2242,8 @@ function bindRoomModal() {
     document.getElementById("re-floor").value = room.floorTexture || "default";
     document.getElementById("re-wallmat").value = room.wallTexture || "default";
     document.getElementById("re-error").hidden = true;
+    // Load existing wall photos + per-wall texture settings into the new UI.
+    if (window.WallPhoto) window.WallPhoto.populate(room);
     renderOpeningsList(JSON.parse(JSON.stringify(room.openings || [])));
     modal.hidden = false;
   });
@@ -2322,17 +2360,35 @@ function bindRoomModal() {
     room.floorTexture = floorTexture;
     room.wallTexture = wallTexture;
     room.openings = openings;
-    // Collect wall photo textures from upload buttons
-    const wallTextures = {};
-    ["top", "bottom", "left", "right"].forEach(wid => {
-      const btn = document.getElementById(`re-wall-photo-${wid}`);
-      if (btn && btn.dataset.wallPhotoData) wallTextures[wid] = btn.dataset.wallPhotoData;
-    });
-    if (Object.keys(wallTextures).length) room.wallTextures = wallTextures;
-    // Persist override
+    // Collect wall photo textures + per-wall settings (fit / tile / brightness
+    // / contrast). The new WallPhoto module owns this state — it persists
+    // photos across reopen/save cycles, supports remove, and exposes a single
+    // collect() call instead of scanning legacy DOM dataset attributes.
+    let wallTextures = {};
+    let wallTextureSettings = {};
+    if (window.WallPhoto) {
+      const collected = window.WallPhoto.collect();
+      wallTextures = collected.wallTextures || {};
+      wallTextureSettings = collected.wallTextureSettings || {};
+    }
+    if (Object.keys(wallTextures).length) {
+      room.wallTextures = wallTextures;
+      room.wallTextureSettings = wallTextureSettings;
+    } else {
+      // User removed all photos in the editor.
+      delete room.wallTextures;
+      delete room.wallTextureSettings;
+    }
+    // Persist override (with quota guard — wall photos are large data URLs).
     const ov = loadRoomOverrides();
-    ov[editingRoomId] = { name, width: w, depth: d, height: h, wallColor, wallColors, wallTextures: room.wallTextures, floorTexture, wallTexture, openings, plan: room.plan };
-    saveRoomOverrides(ov);
+    ov[editingRoomId] = {
+      name, width: w, depth: d, height: h,
+      wallColor, wallColors,
+      wallTextures: room.wallTextures,
+      wallTextureSettings: room.wallTextureSettings,
+      floorTexture, wallTexture, openings, plan: room.plan,
+    };
+    if (!persistRoomOverridesSafely(ov)) return; // quota error already toasted.
     modal.hidden = true;
     // Force full 3D rebuild since room geometry changed
     if (window.AptThreeView && window.AptThreeView.isActiveFor(room.id)) window.AptThreeView.hide();

@@ -896,27 +896,130 @@ kbd {
 }
 
 /* ==========================================================================
-   Feature 4: Wall Photo 
+   Feature 4: Wall Photo (richer controls — drag/drop, fit, brightness, etc.)
    ========================================================================== */
-.wall-photo-btn {
+.wall-photo-btn,
+.wall-photo-clear,
+.wall-photo-toall {
   font-size: 12px !important;
   padding: 2px 6px !important;
   min-width: auto !important;
 }
-.wall-photo-preview {
-  display: block;
-  width: 60px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  margin-top: 4px;
-}
+.wall-photo-clear  { color: #c33 !important; }
+.wall-photo-toall  { color: #2563eb !important; }
+
 .wall-color-item {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  min-width: 150px;
+}
+.wall-color-item > span:first-child {
+  align-self: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.wall-color-actions {
+  display: flex;
   gap: 4px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Drop-zone preview — clickable + drag target. */
+.wall-photo-dropzone {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  min-height: 60px;
+  border: 1.5px dashed var(--border);
+  border-radius: 6px;
+  background: var(--chip-bg);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .15s, background .15s;
+}
+.wall-photo-dropzone:hover,
+.wall-photo-dropzone:focus-visible {
+  border-color: var(--accent, #6892b0);
+  outline: none;
+}
+.wall-photo-dropzone.drag-over {
+  border-color: var(--accent, #6892b0);
+  background: rgba(104, 146, 176, 0.12);
+}
+.wall-photo-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 4px;
+}
+.wall-photo-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+  text-align: center;
+  padding: 4px;
+}
+
+/* Per-wall photo options panel (fit / tile / brightness / contrast). */
+.wall-photo-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.wpo-row,
+.wpo-row-narrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.wpo-row > span,
+.wpo-row-narrow > span {
+  min-width: 42px;
+  color: var(--muted);
+}
+.wpo-row select,
+.wpo-row-narrow input,
+.wpo-row input[type="range"] {
+  flex: 1;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.wpo-row output {
+  min-width: 28px;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.wpo-tile-row {
+  display: flex;
+  gap: 6px;
+}
+.wpo-tile-row .wpo-row-narrow { flex: 1; }
+.wpo-tile-row input { width: 100%; min-width: 0; }
+
+.wall-photo-hint {
+  font-size: 11px;
+  margin-top: 4px;
+  opacity: 0.85;
 }
 
 /* ==========================================================================

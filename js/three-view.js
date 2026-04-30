@@ -729,6 +729,77 @@ function getTileCreamTexture() {
   return tex;
 }
 
+// ---------------------------------------------------------------------------
+// Wall photo texture cache.
+//
+// Builds a CanvasTexture from a (possibly large) data-URL once per
+// (dataUrl + settings) signature, and reuses it on every rebuild. This avoids
+// the previous behaviour of creating a brand-new TextureLoader on every call,
+// which leaked GPU memory and slowed scene rebuilds noticeably for rooms with
+// 4 wall photos.
+//
+// Settings shape: { fit: 'cover'|'stretch'|'tile', tileX, tileY, brightness, contrast }
+//   * cover    — texture stretched once to cover the wall, UV (1,1).
+//   * stretch  — same as cover (alias) — kept for future planar warping.
+//   * tile     — repeat texture tileX × tileY across the wall.
+//   * brightness/contrast — applied via offscreen canvas filter once on creation.
+// ---------------------------------------------------------------------------
+const _wallPhotoCache = new Map();
+function _wallPhotoSig(dataUrl, settings) {
+  // Hash data URL by (length + first/last 32 chars) — collision-resistant
+  // enough for practical use, far cheaper than hashing the entire string.
+  const head = dataUrl.slice(0, 32), tail = dataUrl.slice(-32);
+  const len = dataUrl.length;
+  const s = settings || {};
+  return `${len}|${head}|${tail}|${s.fit||"cover"}|${s.tileX||1}|${s.tileY||1}|${s.brightness||0}|${s.contrast||0}`;
+}
+function getWallPhotoTexture(dataUrl, settings) {
+  if (!dataUrl) return null;
+  const key = _wallPhotoSig(dataUrl, settings);
+  if (_wallPhotoCache.has(key)) return _wallPhotoCache.get(key);
+  // Build asynchronously on an Image, then bake to a canvas with filter.
+  const tex = new THREE.Texture();
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  const img = new Image();
+  img.onload = () => {
+    const w = img.width, h = img.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx2 = canvas.getContext("2d");
+    const s = settings || {};
+    const b = Math.max(-50, Math.min(50, s.brightness || 0));
+    const c = Math.max(-50, Math.min(50, s.contrast || 0));
+    if (b !== 0 || c !== 0) {
+      // brightness: -50..50 → 50%..150%; contrast: same → 50%..150%.
+      const bPct = 100 + b;
+      const cPct = 100 + c;
+      ctx2.filter = `brightness(${bPct}%) contrast(${cPct}%)`;
+    }
+    ctx2.drawImage(img, 0, 0, w, h);
+    tex.image = canvas;
+    tex.needsUpdate = true;
+  };
+  img.onerror = () => { /* swallow — wall just falls back to its color */ };
+  img.src = dataUrl;
+  // Apply tile repeat synchronously (texture takes effect once image loads).
+  const fit = (settings && settings.fit) || "cover";
+  if (fit === "tile") {
+    const tx = Math.max(1, Math.min(20, (settings && settings.tileX) || 2));
+    const ty = Math.max(1, Math.min(20, (settings && settings.tileY) || 2));
+    tex.repeat.set(tx, ty);
+  } else {
+    tex.repeat.set(1, 1);
+  }
+  _wallPhotoCache.set(key, tex);
+  return tex;
+}
+// Public for testability/debug.
+if (typeof window !== "undefined") {
+  window._aptWallPhotoCache = _wallPhotoCache;
+}
+
 // Builds a Shape from polygon vertices (in cm).
 function shapeFromVertices(verts) {
   const shape = new THREE.Shape();
@@ -764,15 +835,16 @@ function buildWalls(scene, room) {
     // so the wall renders the EXACT color from the hex value, no distortion.
     const colorInt = hexToInt(wallHex);
     const matOpts = { color: colorInt, side: THREE.DoubleSide };
-    // If a wall photo texture was uploaded, apply it
+    // Wall photo texture: load via cache + honour per-wall fit/tile/brightness
+    // settings (room.wallTextureSettings[w.wall]).
     const wallTextures = room.wallTextures || {};
+    const wallTexSettings = room.wallTextureSettings || {};
     if (wallTextures[w.wall]) {
-      try {
-        const tex = new THREE.TextureLoader().load(wallTextures[w.wall]);
-        tex.colorSpace = THREE.SRGBColorSpace;
+      const tex = getWallPhotoTexture(wallTextures[w.wall], wallTexSettings[w.wall]);
+      if (tex) {
         matOpts.map = tex;
-        matOpts.color = 0xffffff; // don't tint the texture
-      } catch(e) { /* fallback to flat color */ }
+        matOpts.color = 0xffffff;
+      }
     }
     const mat = new THREE.MeshBasicMaterial(matOpts);
 
@@ -839,13 +911,13 @@ function buildWallsFromVertices(scene, room, useStandard, offX, offZ, collidable
       ? { color: colorInt, roughness: 0.9, side: THREE.DoubleSide }
       : { color: colorInt, side: THREE.DoubleSide };
     const wallTextures = room.wallTextures || {};
+    const wallTexSettings = room.wallTextureSettings || {};
     if (e.dir && wallTextures[e.dir]) {
-      try {
-        const tex = new THREE.TextureLoader().load(wallTextures[e.dir]);
-        tex.colorSpace = THREE.SRGBColorSpace;
+      const tex = getWallPhotoTexture(wallTextures[e.dir], wallTexSettings[e.dir]);
+      if (tex) {
         matOpts.map = tex;
         matOpts.color = 0xffffff;
-      } catch (_) { /* keep flat color */ }
+      }
     }
     const mat = useStandard
       ? new THREE.MeshStandardMaterial(matOpts)
