@@ -22,54 +22,54 @@ const ROOMS = [
   {
     id: "salon",
     name: "الصالون (Reception)",
-    // Pixel-extracted from salon_wide.jpg: pastel lavender-blue walls.
-    // Bright-lit wall pixels average ~#9998B1, brightest ~#BDCCF2.
-    // True paint color (midpoint, white-balance corrected): #A8B4D0.
-    color: "#A8B4D0",
-    wallColor: "#A8B4D0",
+    // New video: light pastel blue walls with one deeper blue accent wall.
+    // Guest/reception side of the open hall.
+    color: "#B8CDE0",
+    wallColor: "#B8CDE0",
     wallColors: {
-      top:    "#A8B4D0",
-      bottom: "#A8B4D0",
-      left:   "#A8B4D0",
-      right:  "#A8B4D0",
+      top:    "#B8CDE0",        // back wall (pastel blue)
+      bottom: "#7BA8C8",        // accent wall (deeper blue) — faces living side
+      left:   "#B8CDE0",        // side wall (pastel blue)
+      right:  "#B8CDE0",        // side wall (pastel blue)
     },
     floorColor: "#e8dfd0",
-    description: "الغرفة الفاخرة بسقف معلق وإضاءة LED مدفونة. تستخدم لاستقبال الضيوف.",
+    description: "جزء الضيوف من الصالة الكبيرة — حائط أزرق مميز وباب بلكونة. يقابل صالة المعيشة.",
     plan: { x: 0, y: 0 },
     width: 500,
     depth: 400,
     openings: [
-      { wall: "top",    at: 200, size: 90, kind: "door",   label: "باب" },
-      { wall: "bottom", at: 180, size: 140, kind: "window", label: "شباك" },
-      { wall: "right",  at: 150, size: 120, kind: "window", label: "شباك" }
+      { wall: "top",    at: 200, size: 90,  kind: "door",   label: "باب" },
+      { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة (ممر مفتوح)" },
+      { wall: "left",   at: 150, size: 180, kind: "window", label: "بلكونة" },
     ],
     allowedCategories: ["living", "common"]
   },
   {
     id: "living",
     name: "الصالة المعيشة",
-    // Pixel-extracted from entrance.jpg/hallway.jpg: soft pastel lavender-blue.
-    // Bright-lit wall pixels ~#9898AF to #8DA0C2, brightest ~#BBCAF5.
-    // True paint color (midpoint, white-balance corrected): #A8B2CE.
-    color: "#A8B2CE",
-    wallColor: "#A8B2CE",
+    // New video: same pastel blue walls, deeper blue accent wall on opposite side.
+    // Living/TV side of the open hall — faces the salon.
+    color: "#B8CDE0",
+    wallColor: "#B8CDE0",
     wallColors: {
-      top:    "#A8B2CE",
-      bottom: "#A8B2CE",
-      left:   "#A8B2CE",
-      right:  "#A8B2CE",
+      top:    "#7BA8C8",        // accent wall (deeper blue) — faces salon side
+      bottom: "#B8CDE0",        // back wall (pastel blue)
+      left:   "#B8CDE0",        // side wall (pastel blue)
+      right:  "#B8CDE0",        // side wall (pastel blue)
     },
     floorColor: "#e8dfd0",
-    description: "غرفة المعيشة اليومية والتلفزيون.",
-    plan: { x: 510, y: 0 },
-    width: 450,
+    description: "جزء المعيشة والتلفزيون من الصالة الكبيرة — يقابل صالة الضيوف.",
+    plan: { x: 0, y: 410 },
+    width: 500,
     depth: 350,
     openings: [
-      { wall: "top",    at: 200, size: 90,  kind: "door",   label: "باب" },
-      { wall: "bottom", at: 150, size: 160, kind: "window", label: "شباك" }
+      { wall: "top",    at: 50,  size: 200, kind: "door",   label: "فتحة (ممر مفتوح)" },
+      { wall: "right",  at: 50,  size: 90,  kind: "door",   label: "باب المطبخ" },
+      { wall: "left",   at: 120, size: 180, kind: "window", label: "بلكونة" },
     ],
     allowedCategories: ["living", "common"]
   },
+
   {
     id: "bedroom_blue",
     name: "غرفة نوم زرقاء",
