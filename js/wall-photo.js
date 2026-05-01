@@ -37,9 +37,10 @@
   };
 
   let _onChange = null;
+  let _cropHandler = null;
 
   function defaultSettings() {
-    return { fit: "cover", tileX: 2, tileY: 2, brightness: 0, contrast: 0 };
+    return { fit: "cover", tileX: 2, tileY: 2, brightness: 0, contrast: 0, blend: "normal" };
   }
 
   function init(opts) {
@@ -58,10 +59,12 @@
         <span>${w.label}</span>
         <input type="color" id="re-wall-${w.id}" />
         <div class="wall-color-actions">
-          <button type="button" class="btn sm ghost wall-photo-btn"     data-action="upload"     data-wall="${w.id}" title="رفع صورة للحائط (📷)">📷</button>
+          <button type="button" class="btn sm ghost wall-photo-btn"      data-action="upload"     data-wall="${w.id}" title="رفع صورة للحائط (📷)">📷</button>
+          <button type="button" class="btn sm ghost wall-photo-presets"  data-action="presets"    data-wall="${w.id}" title="مكتبة خامات جاهزة">🎨</button>
           <button type="button" class="btn sm ghost wall-eyedropper-btn" data-action="eyedropper" data-wall="${w.id}" title="اختيار لون من صورة">🔍</button>
-          <button type="button" class="btn sm ghost wall-photo-clear"   data-action="clear"      data-wall="${w.id}" title="إزالة الصورة" hidden>🗑</button>
-          <button type="button" class="btn sm ghost wall-photo-toall"   data-action="toall"      data-wall="${w.id}" title="نسخ الصورة لكل الجدران" hidden>📋</button>
+          <button type="button" class="btn sm ghost wall-photo-clear"    data-action="clear"      data-wall="${w.id}" title="إزالة الصورة" hidden>🗑</button>
+          <button type="button" class="btn sm ghost wall-photo-toall"    data-action="toall"      data-wall="${w.id}" title="نسخ الصورة لكل الجدران (والإعدادات)" hidden>📋</button>
+          <button type="button" class="btn sm ghost wall-photo-allrooms" data-action="allrooms"   data-wall="${w.id}" title="تطبيق الصورة على جدران كل الغرف" hidden>🏘️</button>
         </div>
         <input type="file" id="re-wall-photo-input-${w.id}" accept="image/*" hidden />
         <div class="wall-photo-dropzone" data-wall="${w.id}" tabindex="0" aria-label="اسحب صورة هنا أو اضغط للرفع">
@@ -91,6 +94,20 @@
             <input class="wpo-contrast" type="range" min="-50" max="50" step="2" value="0" data-wall="${w.id}" />
             <output class="wpo-contrast-val">0</output>
           </label>
+          <label class="wpo-row" title="مزج الصورة مع لون الجدار">
+            <span>مزج</span>
+            <select class="wpo-blend" data-wall="${w.id}">
+              <option value="normal">عادي</option>
+              <option value="multiply">ضرب (مظلم)</option>
+              <option value="screen">شاشة (فاتح)</option>
+              <option value="overlay">تراكب</option>
+              <option value="soft-light">إضاءة ناعمة</option>
+              <option value="hard-light">إضاءة قوية</option>
+              <option value="darken">تقتيم</option>
+              <option value="lighten">تفتيح</option>
+              <option value="color">صبغ بلون الجدار</option>
+            </select>
+          </label>
         </div>
       </div>
     `;
@@ -106,6 +123,8 @@
     const dropzone = root.querySelector(".wall-photo-dropzone");
     const clearBtn = root.querySelector('[data-action="clear"]');
     const toAllBtn = root.querySelector('[data-action="toall"]');
+    const allRoomsBtn = root.querySelector('[data-action="allrooms"]');
+    const presetsBtn = root.querySelector('[data-action="presets"]');
     const opts_ = root.querySelector(".wall-photo-options");
     const tileRow = root.querySelector(".wpo-tile-row");
 
@@ -113,6 +132,12 @@
       e.preventDefault();
       fileInput.click();
     });
+    if (presetsBtn) {
+      presetsBtn.addEventListener("click", e => {
+        e.preventDefault();
+        if (typeof opts.onOpenPresets === "function") opts.onOpenPresets(wallId);
+      });
+    }
     // The eyedropper button has class .wall-eyedropper-btn — its click
     // handler is registered globally by bindEyedropperButtons() in app.js.
     // We deliberately do NOT bind it here to avoid double-firing.
@@ -127,13 +152,22 @@
       if (!src) return;
       WALLS.forEach(w => {
         setPhoto(w.id, src);
-        // Inherit the same settings.
         _state.settings[w.id] = { ..._state.settings[wallId] };
         applySettingsToUI(w.id);
       });
       _emit();
       if (typeof window.toast === "function") window.toast("تم نسخ الصورة لكل الجدران");
     });
+    if (allRoomsBtn) {
+      allRoomsBtn.addEventListener("click", e => {
+        e.preventDefault();
+        const src = _state.photos[wallId];
+        if (!src) return;
+        if (typeof opts.onApplyAllRooms === "function") {
+          opts.onApplyAllRooms(wallId, src, _state.settings[wallId] || defaultSettings());
+        }
+      });
+    }
 
     fileInput.addEventListener("change", () => {
       const file = fileInput.files && fileInput.files[0];
@@ -184,6 +218,14 @@
         _emit();
       });
     });
+    const blendSel = root.querySelector(".wpo-blend");
+    if (blendSel) {
+      blendSel.addEventListener("change", e => {
+        const s = ensureSettings(wallId);
+        s.blend = e.target.value;
+        _emit();
+      });
+    }
     [
       [".wpo-bright",   ".wpo-bright-val",   "brightness"],
       [".wpo-contrast", ".wpo-contrast-val", "contrast"],
@@ -226,8 +268,18 @@
 
   function ingestImageFile(file, wallId) {
     resizeImageToDataURL(file, MAX_PX, dataUrl => {
-      setPhoto(wallId, dataUrl);
-      _emit();
+      // If a crop handler is registered, route through it first; otherwise
+      // commit the resized image directly.
+      if (typeof _cropHandler === "function") {
+        _cropHandler(dataUrl, wallId, (finalDataUrl) => {
+          if (!finalDataUrl) return; // user cancelled
+          setPhoto(wallId, finalDataUrl);
+          _emit();
+        });
+      } else {
+        setPhoto(wallId, dataUrl);
+        _emit();
+      }
     });
   }
 
@@ -241,6 +293,7 @@
     const empty   = root.querySelector(".wall-photo-empty");
     const clearBtn = root.querySelector('[data-action="clear"]');
     const toAllBtn = root.querySelector('[data-action="toall"]');
+    const allRoomsBtn = root.querySelector('[data-action="allrooms"]');
     const opts_   = root.querySelector(".wall-photo-options");
 
     if (dataUrl) {
@@ -249,6 +302,7 @@
       if (empty) empty.hidden = true;
       clearBtn.hidden = false;
       toAllBtn.hidden = false;
+      if (allRoomsBtn) allRoomsBtn.hidden = false;
       opts_.hidden = false;
       applySettingsToUI(wallId);
     } else {
@@ -257,6 +311,7 @@
       if (empty) empty.hidden = false;
       clearBtn.hidden = true;
       toAllBtn.hidden = true;
+      if (allRoomsBtn) allRoomsBtn.hidden = true;
       opts_.hidden = true;
       _state.settings[wallId] = null;
     }
@@ -279,6 +334,28 @@
     root.querySelector(".wpo-bright-val").textContent = s.brightness;
     root.querySelector(".wpo-contrast").value = s.contrast;
     root.querySelector(".wpo-contrast-val").textContent = s.contrast;
+    const blendEl = root.querySelector(".wpo-blend");
+    if (blendEl) blendEl.value = s.blend || "normal";
+  }
+  // Apply a built dataUrl + settings to a specific wall (used by the
+  // wallpaper presets gallery).
+  function applyImageToWall(wallId, dataUrl, settings) {
+    if (!dataUrl) return;
+    setPhoto(wallId, dataUrl);
+    if (settings) {
+      _state.settings[wallId] = { ...defaultSettings(), ...settings };
+      applySettingsToUI(wallId);
+    }
+    _emit();
+  }
+  function applyImageToAllWalls(dataUrl, settings) {
+    if (!dataUrl) return;
+    WALLS.forEach(w => {
+      setPhoto(w.id, dataUrl);
+      _state.settings[w.id] = { ...defaultSettings(), ...(settings || {}) };
+      applySettingsToUI(w.id);
+    });
+    _emit();
   }
 
   // ----- Public API -----
@@ -337,5 +414,15 @@
     reader.readAsDataURL(file);
   }
 
-  window.WallPhoto = { init, populate, collect, reset };
+  // ----- Crop pipeline (optional) -----
+  // ingestImageFile by default skips the crop modal, but app.js can override
+  // by setting an `onCrop(dataUrl, wallId, done)` handler at init time.
+  // See bindWallItem above for the invocation site.
+  function setCropHandler(fn) { _cropHandler = fn; }
+
+  window.WallPhoto = {
+    init, populate, collect, reset,
+    applyImageToWall, applyImageToAllWalls,
+    setCropHandler,
+  };
 })();

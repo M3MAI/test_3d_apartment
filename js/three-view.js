@@ -745,19 +745,32 @@ function getTileCreamTexture() {
 //   * brightness/contrast — applied via offscreen canvas filter once on creation.
 // ---------------------------------------------------------------------------
 const _wallPhotoCache = new Map();
-function _wallPhotoSig(dataUrl, settings) {
+function _wallPhotoSig(dataUrl, settings, wallColor) {
   // Hash data URL by (length + first/last 32 chars) — collision-resistant
   // enough for practical use, far cheaper than hashing the entire string.
   const head = dataUrl.slice(0, 32), tail = dataUrl.slice(-32);
   const len = dataUrl.length;
   const s = settings || {};
-  return `${len}|${head}|${tail}|${s.fit||"cover"}|${s.tileX||1}|${s.tileY||1}|${s.brightness||0}|${s.contrast||0}`;
+  return `${len}|${head}|${tail}|${s.fit||"cover"}|${s.tileX||1}|${s.tileY||1}|${s.brightness||0}|${s.contrast||0}|${s.blend||"normal"}|${wallColor||""}`;
 }
-function getWallPhotoTexture(dataUrl, settings) {
+// Map our blend keywords to the corresponding canvas globalCompositeOperation.
+const _BLEND_OPS = {
+  normal:       null,
+  multiply:     "multiply",
+  screen:       "screen",
+  overlay:      "overlay",
+  "soft-light": "soft-light",
+  "hard-light": "hard-light",
+  darken:       "darken",
+  lighten:      "lighten",
+  color:        "color",   // tint by hue+sat of wall color
+};
+function getWallPhotoTexture(dataUrl, settings, wallColor) {
   if (!dataUrl) return null;
-  const key = _wallPhotoSig(dataUrl, settings);
+  const key = _wallPhotoSig(dataUrl, settings, wallColor);
   if (_wallPhotoCache.has(key)) return _wallPhotoCache.get(key);
-  // Build asynchronously on an Image, then bake to a canvas with filter.
+  // Build asynchronously on an Image, then bake to a canvas with filter
+  // and optional blend mode against the wall's solid color.
   const tex = new THREE.Texture();
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
@@ -769,21 +782,34 @@ function getWallPhotoTexture(dataUrl, settings) {
     canvas.width = w; canvas.height = h;
     const ctx2 = canvas.getContext("2d");
     const s = settings || {};
-    const b = Math.max(-50, Math.min(50, s.brightness || 0));
-    const c = Math.max(-50, Math.min(50, s.contrast || 0));
-    if (b !== 0 || c !== 0) {
-      // brightness: -50..50 → 50%..150%; contrast: same → 50%..150%.
-      const bPct = 100 + b;
-      const cPct = 100 + c;
-      ctx2.filter = `brightness(${bPct}%) contrast(${cPct}%)`;
+    const blendOp = _BLEND_OPS[s.blend || "normal"];
+    // For non-trivial blends we paint the wall color underneath, then
+    // composite the (filtered) photo on top with the chosen blend mode.
+    if (blendOp && wallColor) {
+      ctx2.fillStyle = wallColor;
+      ctx2.fillRect(0, 0, w, h);
+      const b = Math.max(-50, Math.min(50, s.brightness || 0));
+      const c = Math.max(-50, Math.min(50, s.contrast || 0));
+      if (b !== 0 || c !== 0) {
+        ctx2.filter = `brightness(${100 + b}%) contrast(${100 + c}%)`;
+      }
+      ctx2.globalCompositeOperation = blendOp;
+      ctx2.drawImage(img, 0, 0, w, h);
+      ctx2.globalCompositeOperation = "source-over";
+      ctx2.filter = "none";
+    } else {
+      const b = Math.max(-50, Math.min(50, s.brightness || 0));
+      const c = Math.max(-50, Math.min(50, s.contrast || 0));
+      if (b !== 0 || c !== 0) {
+        ctx2.filter = `brightness(${100 + b}%) contrast(${100 + c}%)`;
+      }
+      ctx2.drawImage(img, 0, 0, w, h);
     }
-    ctx2.drawImage(img, 0, 0, w, h);
     tex.image = canvas;
     tex.needsUpdate = true;
   };
   img.onerror = () => { /* swallow — wall just falls back to its color */ };
   img.src = dataUrl;
-  // Apply tile repeat synchronously (texture takes effect once image loads).
   const fit = (settings && settings.fit) || "cover";
   if (fit === "tile") {
     const tx = Math.max(1, Math.min(20, (settings && settings.tileX) || 2));
@@ -840,7 +866,7 @@ function buildWalls(scene, room) {
     const wallTextures = room.wallTextures || {};
     const wallTexSettings = room.wallTextureSettings || {};
     if (wallTextures[w.wall]) {
-      const tex = getWallPhotoTexture(wallTextures[w.wall], wallTexSettings[w.wall]);
+      const tex = getWallPhotoTexture(wallTextures[w.wall], wallTexSettings[w.wall], wallHex);
       if (tex) {
         matOpts.map = tex;
         matOpts.color = 0xffffff;
@@ -913,7 +939,7 @@ function buildWallsFromVertices(scene, room, useStandard, offX, offZ, collidable
     const wallTextures = room.wallTextures || {};
     const wallTexSettings = room.wallTextureSettings || {};
     if (e.dir && wallTextures[e.dir]) {
-      const tex = getWallPhotoTexture(wallTextures[e.dir], wallTexSettings[e.dir]);
+      const tex = getWallPhotoTexture(wallTextures[e.dir], wallTexSettings[e.dir], wallHex);
       if (tex) {
         matOpts.map = tex;
         matOpts.color = 0xffffff;

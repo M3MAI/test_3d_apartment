@@ -138,9 +138,367 @@ function applyRoomOverrides() {
     if (o.plan) r.plan = o.plan;
     if (o.floorTexture) r.floorTexture = o.floorTexture;
     if (o.wallTexture)  r.wallTexture  = o.wallTexture;
+    // Legacy: wall textures used to live inside the localStorage override.
+    // They've been migrated into IndexedDB (see js/wall-storage.js) on first
+    // run, but if migration hasn't completed yet we fall back to whatever's
+    // still in the JSON — applyWallStorageToRooms() will overwrite afterwards.
     if (o.wallTextures) r.wallTextures = o.wallTextures;
     if (o.wallTextureSettings) r.wallTextureSettings = o.wallTextureSettings;
     if (o.vertices && Array.isArray(o.vertices)) r.vertices = o.vertices;
+  });
+}
+// Hydrate wall photos + per-wall settings into ROOMS from IndexedDB. Called
+// once on boot after WallStorage.init() resolves, and again whenever a save
+// flow updates IDB. App-level default wallpaper (if any) is applied to walls
+// that don't have their own photo.
+function applyWallStorageToRooms() {
+  if (!window.WallStorage) return;
+  const def = window.WallStorage.getDefault();
+  const hasDefault = def && def.textures && Object.keys(def.textures).length > 0;
+  ROOMS.forEach(r => {
+    const { textures, settings } = window.WallStorage.getAllForRoom(r.id);
+    const hasOwn = Object.keys(textures).length > 0;
+    // If WallStorage has nothing to say about this room (e.g. IDB unavailable
+    // or this room genuinely has no photos), don't clobber whatever the
+    // legacy override pipeline already put on the room.
+    if (!hasOwn && !hasDefault) return;
+    const merged = { ...textures };
+    const mergedS = { ...settings };
+    if (hasDefault) {
+      ["top", "bottom", "left", "right"].forEach(wId => {
+        if (!merged[wId] && def.textures[wId]) {
+          merged[wId] = def.textures[wId];
+          if (def.settings && def.settings[wId]) mergedS[wId] = def.settings[wId];
+        }
+      });
+    }
+    r.wallTextures = merged;
+    r.wallTextureSettings = mergedS;
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Wallpaper presets gallery — opens a modal that shows procedural patterns
+// from window.WallpaperPresets and lets the user apply one to:
+//   • the current wall only, or
+//   • all walls of the current room, or
+//   • all walls of all rooms (default wallpaper).
+// State is captured in module-local closure variables.
+// -----------------------------------------------------------------------------
+let editingRoomId = null;
+let _activeWallpaperWall = null;
+function openWallpaperGalleryFor(wallId) {
+  _activeWallpaperWall = wallId;
+  const modal = document.getElementById("wallpaper-modal");
+  if (!modal) return;
+  const grid = document.getElementById("wallpaper-grid");
+  const hint = document.getElementById("wallpaper-modal-hint");
+  if (hint) {
+    const wallNames = { top: "الشمالي", bottom: "الجنوبي", left: "الغربي", right: "الشرقي" };
+    hint.textContent = `اختر خامة لتطبيقها على الجدار ${wallNames[wallId] || wallId}.`;
+  }
+  // Reset the target choice to "this wall" each time the modal opens — most
+  // users want a per-wall choice; bulk options remain one click away.
+  const radios = modal.querySelectorAll('input[name="wp-target"]');
+  radios.forEach(r => { r.checked = (r.value === "this-wall"); });
+  if (window.WallpaperPresets) {
+    grid.innerHTML = "";
+    window.WallpaperPresets.list().forEach(preset => {
+      const card = document.createElement("button");
+      card.className = "wallpaper-card";
+      card.type = "button";
+      card.setAttribute("role", "listitem");
+      card.dataset.id = preset.id;
+      card.title = preset.name;
+      card.innerHTML = `
+        <img class="wp-thumb" src="${window.WallpaperPresets.getThumb(preset.id)}" alt="${preset.name}" />
+        <div class="wp-name">${preset.icon || ""} ${preset.name}</div>`;
+      card.addEventListener("click", () => onPickPreset(preset.id));
+      grid.appendChild(card);
+    });
+  }
+  modal.hidden = false;
+}
+function onPickPreset(presetId) {
+  const modal = document.getElementById("wallpaper-modal");
+  const target = (modal.querySelector('input[name="wp-target"]:checked') || {}).value || "this-wall";
+  const dataUrl = window.WallpaperPresets.buildDataUrl(presetId);
+  const settings = window.WallpaperPresets.buildSettings(presetId);
+  if (!dataUrl) return;
+  if (target === "this-wall" && _activeWallpaperWall) {
+    window.WallPhoto.applyImageToWall(_activeWallpaperWall, dataUrl, settings);
+    toast("تم تطبيق الخامة على الجدار");
+  } else if (target === "this-room") {
+    window.WallPhoto.applyImageToAllWalls(dataUrl, settings);
+    toast("تم تطبيق الخامة على كل جدران الغرفة");
+  } else if (target === "all-rooms") {
+    // Set as app-level default wallpaper.
+    if (window.WallStorage) {
+      const txs = { top: dataUrl, bottom: dataUrl, left: dataUrl, right: dataUrl };
+      const stx = { top: settings, bottom: settings, left: settings, right: settings };
+      window.WallStorage.setDefault(txs, stx).then(() => {
+        applyWallStorageToRooms();
+        // Also reflect in the currently-edited room's UI.
+        window.WallPhoto.applyImageToAllWalls(dataUrl, settings);
+        drawRoom();
+        toast("تم تعيين الخامة كافتراضية لكل الغرف");
+      });
+    }
+  }
+  modal.hidden = true;
+}
+function bindWallpaperGallery() {
+  const modal = document.getElementById("wallpaper-modal");
+  const closeBtn = document.getElementById("wallpaper-modal-close");
+  if (!modal || !closeBtn) return;
+  if (closeBtn._bound) return;
+  closeBtn._bound = true;
+  closeBtn.addEventListener("click", () => modal.hidden = true);
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+}
+
+// -----------------------------------------------------------------------------
+// Apply the current wall's photo to every room's walls. Used by the 🏘️
+// per-wall button. Settings are inherited too (so "apply to all" applies
+// fit/tile/brightness/contrast/blend uniformly).
+// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Crop & Pan modal — opens before a freshly-uploaded image is applied to a
+// wall. The user can drag the frame to position, drag a corner to resize,
+// and pick an aspect ratio (free / fixed / auto from wall).
+//
+// Contract: openCropModal(dataUrl, wallId, done) — `done(finalDataUrl|null)`
+//           is called once when the user confirms or cancels.
+// -----------------------------------------------------------------------------
+const _crop = {
+  active: false,
+  done: null,
+  img: null,
+  imgDispW: 0, imgDispH: 0,    // displayed image size on canvas (px)
+  canvasW: 0, canvasH: 0,
+  // Crop frame in CANVAS pixel coords (relative to drawn image area).
+  frame: { x: 0, y: 0, w: 0, h: 0 },
+  aspect: null,                 // null → free
+  drag: null,                   // { mode: "move"|"nw"|"ne"|"sw"|"se", startX, startY, ...orig }
+  wallId: null,
+  wallAspect: null,             // computed from room when "auto" picked
+};
+
+function bindCropModal() {
+  const modal = document.getElementById("crop-modal");
+  if (!modal || modal._bound) return;
+  modal._bound = true;
+
+  const closeBtn = document.getElementById("crop-modal-close");
+  const cancelBtn = document.getElementById("crop-cancel");
+  const applyBtn = document.getElementById("crop-apply");
+  const resetBtn = document.getElementById("crop-reset");
+  const aspectSel = document.getElementById("crop-aspect");
+  const stage = document.getElementById("crop-stage");
+  const frame = document.getElementById("crop-frame");
+
+  const finish = (dataUrl) => {
+    _crop.active = false;
+    modal.hidden = true;
+    if (_crop.done) {
+      const cb = _crop.done;
+      _crop.done = null;
+      cb(dataUrl);
+    }
+  };
+  closeBtn.addEventListener("click", () => finish(null));
+  cancelBtn.addEventListener("click", () => finish(null));
+  modal.addEventListener("click", e => { if (e.target === modal) finish(null); });
+  applyBtn.addEventListener("click", () => {
+    const url = renderCroppedDataUrl();
+    finish(url);
+  });
+  resetBtn.addEventListener("click", () => {
+    _crop.frame = { x: 0, y: 0, w: _crop.imgDispW, h: _crop.imgDispH };
+    syncFrameDom();
+  });
+
+  aspectSel.addEventListener("change", () => {
+    const v = aspectSel.value;
+    if (v === "free") _crop.aspect = null;
+    else if (v === "auto") _crop.aspect = _crop.wallAspect || null;
+    else _crop.aspect = parseFloat(v);
+    if (_crop.aspect) clampFrameToAspect();
+    syncFrameDom();
+  });
+
+  // Pointer interactions: dragging the frame body moves it; dragging a
+  // handle resizes from that corner.
+  const onDown = (ev) => {
+    if (!_crop.active) return;
+    const target = ev.target;
+    const handle = target && target.classList && target.classList.contains("crop-handle")
+      ? target.dataset.h : null;
+    const inFrame = target === frame || frame.contains(target);
+    if (!handle && !inFrame) return;
+    ev.preventDefault();
+    frame.setPointerCapture && frame.setPointerCapture(ev.pointerId);
+    _crop.drag = {
+      mode: handle || "move",
+      startX: ev.clientX, startY: ev.clientY,
+      orig: { ..._crop.frame },
+    };
+  };
+  const onMove = (ev) => {
+    if (!_crop.drag) return;
+    const dx = ev.clientX - _crop.drag.startX;
+    const dy = ev.clientY - _crop.drag.startY;
+    const f = { ..._crop.drag.orig };
+    if (_crop.drag.mode === "move") {
+      f.x = clamp(f.x + dx, 0, _crop.imgDispW - f.w);
+      f.y = clamp(f.y + dy, 0, _crop.imgDispH - f.h);
+    } else {
+      // Resize from a corner.
+      let nx = f.x, ny = f.y, nw = f.w, nh = f.h;
+      const right  = f.x + f.w;
+      const bottom = f.y + f.h;
+      if (_crop.drag.mode === "nw") { nx = clamp(f.x + dx, 0, right - 20);  nw = right - nx; ny = clamp(f.y + dy, 0, bottom - 20); nh = bottom - ny; }
+      if (_crop.drag.mode === "ne") { nw = clamp(f.w + dx, 20, _crop.imgDispW - f.x); ny = clamp(f.y + dy, 0, bottom - 20); nh = bottom - ny; }
+      if (_crop.drag.mode === "sw") { nx = clamp(f.x + dx, 0, right - 20);  nw = right - nx; nh = clamp(f.h + dy, 20, _crop.imgDispH - f.y); }
+      if (_crop.drag.mode === "se") { nw = clamp(f.w + dx, 20, _crop.imgDispW - f.x); nh = clamp(f.h + dy, 20, _crop.imgDispH - f.y); }
+      f.x = nx; f.y = ny; f.w = nw; f.h = nh;
+      if (_crop.aspect) {
+        // Adjust width to maintain aspect, anchored at the moved corner.
+        const targetW = f.h * _crop.aspect;
+        if (_crop.drag.mode.endsWith("e")) f.w = Math.min(targetW, _crop.imgDispW - f.x);
+        else { // w-anchored corners
+          const newW = Math.min(targetW, right);
+          f.x = right - newW;
+          f.w = newW;
+        }
+      }
+    }
+    _crop.frame = f;
+    syncFrameDom();
+  };
+  const onUp = () => { _crop.drag = null; };
+  stage.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+
+  function clampFrameToAspect() {
+    if (!_crop.aspect) return;
+    const f = _crop.frame;
+    const ar = _crop.aspect;
+    // Centre-shrink to fit aspect.
+    const wByH = f.h * ar;
+    if (wByH <= f.w) f.w = wByH;
+    else f.h = f.w / ar;
+    // Keep within image bounds.
+    f.x = clamp(f.x, 0, _crop.imgDispW - f.w);
+    f.y = clamp(f.y, 0, _crop.imgDispH - f.h);
+  }
+}
+
+function syncFrameDom() {
+  const frame = document.getElementById("crop-frame");
+  const stage = document.getElementById("crop-stage");
+  const canvas = document.getElementById("crop-canvas");
+  if (!frame || !stage || !canvas) return;
+  // Frame DOM is positioned relative to the stage; the canvas is centered
+  // inside the stage (flex), so we need to offset by canvas.offsetLeft.
+  const off = canvas.offsetLeft;
+  const offT = canvas.offsetTop;
+  frame.style.left   = (off + _crop.frame.x) + "px";
+  frame.style.top    = (offT + _crop.frame.y) + "px";
+  frame.style.width  = _crop.frame.w + "px";
+  frame.style.height = _crop.frame.h + "px";
+  const info = document.getElementById("crop-info");
+  if (info) {
+    const sx = _crop.img ? (_crop.img.width / _crop.imgDispW) : 1;
+    const sy = _crop.img ? (_crop.img.height / _crop.imgDispH) : 1;
+    const px = Math.round(_crop.frame.w * sx);
+    const py = Math.round(_crop.frame.h * sy);
+    info.textContent = `حجم القص: ${px} × ${py} بكسل`;
+  }
+}
+
+function renderCroppedDataUrl() {
+  if (!_crop.img) return null;
+  const sx = _crop.img.width  / _crop.imgDispW;
+  const sy = _crop.img.height / _crop.imgDispH;
+  const cropX = _crop.frame.x * sx;
+  const cropY = _crop.frame.y * sy;
+  const cropW = Math.max(1, _crop.frame.w * sx);
+  const cropH = Math.max(1, _crop.frame.h * sy);
+  const out = document.createElement("canvas");
+  out.width = Math.round(cropW);
+  out.height = Math.round(cropH);
+  const ctx = out.getContext("2d");
+  ctx.drawImage(_crop.img, cropX, cropY, cropW, cropH, 0, 0, out.width, out.height);
+  return out.toDataURL("image/jpeg", 0.88);
+}
+
+// Public entry point — registered with WallPhoto.setCropHandler().
+window.openCropModal = function (dataUrl, wallId, done) {
+  const modal = document.getElementById("crop-modal");
+  if (!modal) { done(dataUrl); return; }
+  bindCropModal(); // idempotent
+  const canvas = document.getElementById("crop-canvas");
+  const ctx = canvas.getContext("2d");
+  const img = new Image();
+  img.onload = () => {
+    // Fit image into the stage area while preserving aspect.
+    const stage = document.getElementById("crop-stage");
+    const maxW = stage.clientWidth || 700;
+    const maxH = 540;
+    const ar = img.width / img.height;
+    let dispW = img.width, dispH = img.height;
+    if (dispW > maxW) { dispW = maxW; dispH = dispW / ar; }
+    if (dispH > maxH) { dispH = maxH; dispW = dispH * ar; }
+    canvas.width = Math.round(dispW);
+    canvas.height = Math.round(dispH);
+    ctx.drawImage(img, 0, 0, dispW, dispH);
+    _crop.img = img;
+    _crop.imgDispW = dispW;
+    _crop.imgDispH = dispH;
+    _crop.frame = { x: 0, y: 0, w: dispW, h: dispH };
+    _crop.aspect = null;
+    _crop.wallId = wallId;
+    // Compute the wall's natural aspect ratio (length/height in cm) so the
+    // "auto" option can match it. Falls back to free when room not found.
+    const room = ROOMS.find(r => r.id === editingRoomId);
+    _crop.wallAspect = null;
+    if (room) {
+      const H = room.height || 280;
+      const len = (wallId === "top" || wallId === "bottom")
+        ? room.width
+        : room.depth;
+      if (len) _crop.wallAspect = len / H;
+    }
+    document.getElementById("crop-aspect").value = "free";
+    _crop.active = true;
+    _crop.done = done;
+    modal.hidden = false;
+    syncFrameDom();
+  };
+  img.onerror = () => { done(dataUrl); };
+  img.src = dataUrl;
+};
+
+function applyWallPhotoToAllRooms(wallId, dataUrl, settings) {
+  if (!dataUrl || !window.WallStorage) return;
+  if (!confirm("تطبيق هذه الصورة على كل جدران كل الغرف؟")) return;
+  const txs = { top: dataUrl, bottom: dataUrl, left: dataUrl, right: dataUrl };
+  const stx = { top: settings, bottom: settings, left: settings, right: settings };
+  // Also write per-room IDB rows (so even rooms that already have other
+  // photos get this one — explicit user-requested override) plus a default
+  // for any future room.
+  const writes = ROOMS.map(r => window.WallStorage.setRoom(r.id, txs, stx));
+  writes.push(window.WallStorage.setDefault(txs, stx));
+  Promise.all(writes).then(() => {
+    applyWallStorageToRooms();
+    // Refresh the modal's UI to reflect the newly applied photos.
+    const room = ROOMS.find(r => r.id === editingRoomId);
+    if (room) window.WallPhoto.populate(room);
+    drawRoom();
+    toast("تم تطبيق الصورة على كل الغرف", "ok", 4000);
   });
 }
 
@@ -166,6 +524,15 @@ document.addEventListener("DOMContentLoaded", () => {
       drawRoom();
     });
   }
+  // Hydrate wall photos from IDB (with one-time migration from localStorage).
+  // Until this resolves, rooms still use whatever wallTextures are in the
+  // legacy override (good enough for first paint); we re-draw afterwards.
+  if (window.WallStorage && typeof window.WallStorage.init === "function") {
+    window.WallStorage.init().then(() => {
+      applyWallStorageToRooms();
+      drawRoom();
+    });
+  }
   bindTopbar();
   bindCatalogSearch();
   bindViewControls();
@@ -183,12 +550,18 @@ document.addEventListener("DOMContentLoaded", () => {
   bindWallPhotoUploads();
   bindEyedropperButtons();
   // New richer wall-photo controller (drag/drop, paste, fit modes, brightness,
-  // contrast, apply-to-all, remove). It builds the .wall-color-grid items
-  // dynamically — eyedropper buttons must be (re)bound AFTER init so they
-  // pick up the freshly rendered DOM nodes.
+  // contrast, blend mode, presets, apply-to-all, apply-to-all-rooms, crop).
+  // It builds the .wall-color-grid items dynamically — eyedropper buttons
+  // must be (re)bound AFTER init so they pick up the freshly rendered DOM.
   if (window.WallPhoto) {
-    window.WallPhoto.init({});
+    window.WallPhoto.init({
+      onOpenPresets: openWallpaperGalleryFor,
+      onApplyAllRooms: applyWallPhotoToAllRooms,
+    });
+    if (window.openCropModal) window.WallPhoto.setCropHandler(window.openCropModal);
     bindEyedropperButtons();
+    bindWallpaperGallery();
+    bindCropModal();
   }
   bindOnboarding();
 
@@ -2211,7 +2584,8 @@ function bindRoomModal() {
   const addDoorBtn = document.getElementById("re-add-door");
   const addWinBtn = document.getElementById("re-add-window");
 
-  let editingRoomId = null;
+  // editingRoomId is module-level (declared near top) so cross-feature helpers
+  // (wallpaper gallery, apply-to-all-rooms, crop modal) can read/write it.
 
   // "Apply to all" button: copies North wall color to all 4 walls
   const applyAllBtn = document.getElementById("re-wall-apply-all");
@@ -2322,8 +2696,14 @@ function bindRoomModal() {
     const ov = loadRoomOverrides();
     delete ov[editingRoomId];
     saveRoomOverrides(ov);
-    // Reload page so ROOMS reflects defaults cleanly.
-    location.reload();
+    // Also drop any wall photos for this room from IndexedDB.
+    const _id = editingRoomId;
+    const finishReset = () => location.reload();
+    if (window.WallStorage) {
+      window.WallStorage.clearRoom(_id).then(finishReset).catch(finishReset);
+    } else {
+      finishReset();
+    }
   });
 
   saveBtn.addEventListener("click", () => {
@@ -2379,18 +2759,26 @@ function bindRoomModal() {
       delete room.wallTextures;
       delete room.wallTextureSettings;
     }
-    // Persist override (with quota guard — wall photos are large data URLs).
+    // Persist room metadata to localStorage WITHOUT the heavy wallTextures
+    // payload — those go to IndexedDB via WallStorage instead. This keeps the
+    // localStorage entry lean (well below the 5MB quota) and lets users save
+    // many wall photos across many rooms without errors.
     const ov = loadRoomOverrides();
     ov[editingRoomId] = {
       name, width: w, depth: d, height: h,
       wallColor, wallColors,
-      wallTextures: room.wallTextures,
-      wallTextureSettings: room.wallTextureSettings,
       floorTexture, wallTexture, openings, plan: room.plan,
     };
     if (!persistRoomOverridesSafely(ov)) return; // quota error already toasted.
+    // Persist photos to IDB asynchronously. We don't await here so the modal
+    // closes immediately; the IDB write is fire-and-forget but error-handled.
+    if (window.WallStorage) {
+      window.WallStorage.setRoom(editingRoomId, wallTextures, wallTextureSettings)
+        .catch(e => {
+          if (typeof toast === "function") toast("تعذّر حفظ صور الجدران: " + (e && e.message || ""), "err");
+        });
+    }
     modal.hidden = true;
-    // Force full 3D rebuild since room geometry changed
     if (window.AptThreeView && window.AptThreeView.isActiveFor(room.id)) window.AptThreeView.hide();
     renderRoomList();
     drawRoom();

@@ -11,7 +11,10 @@
 
 const CUSTOM_ITEMS_KEY = "apt_custom_items_v1"; // legacy localStorage key
 const IDB_NAME    = "apt";
-const IDB_VERSION = 1;
+// Bumped from 1 → 2 to add the shared `wallPhotos` store used by
+// js/wall-storage.js. Both modules open the same DB, so the version must
+// match; both upgrade handlers create their own store if missing.
+const IDB_VERSION = 2;
 const IDB_STORE   = "customItems";
 const MAX_IMG_PX  = 768;
 
@@ -24,6 +27,11 @@ function idbOpen() {
       const db = req.result;
       if (!db.objectStoreNames.contains(IDB_STORE)) {
         db.createObjectStore(IDB_STORE, { keyPath: "id" });
+      }
+      // Wall photos store — created defensively here too in case wall-storage.js
+      // hasn't run yet (e.g. older script ordering).
+      if (!db.objectStoreNames.contains("wallPhotos")) {
+        db.createObjectStore("wallPhotos", { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);

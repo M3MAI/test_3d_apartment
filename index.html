@@ -339,6 +339,67 @@
     </div>
   </div>
 
+  <!-- Wallpaper presets gallery (procedural patterns) -->
+  <div class="modal-backdrop" id="wallpaper-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wallpaper-modal-title" style="max-width:780px">
+      <header class="modal-head">
+        <h3 id="wallpaper-modal-title">🎨 مكتبة خامات ورق الحائط</h3>
+        <button class="btn sm icon-btn" id="wallpaper-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="hint" id="wallpaper-modal-hint">اختر خامة لتطبيقها على الجدار.</p>
+        <div class="wallpaper-target-row">
+          <label><input type="radio" name="wp-target" value="this-wall" checked /> على هذا الجدار فقط</label>
+          <label><input type="radio" name="wp-target" value="this-room" /> على كل جدران الغرفة</label>
+          <label><input type="radio" name="wp-target" value="all-rooms" /> على كل الغرف (افتراضي للشقة)</label>
+        </div>
+        <div id="wallpaper-grid" class="wallpaper-grid" role="list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crop image modal (used before applying an uploaded wall photo) -->
+  <div class="modal-backdrop" id="crop-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="crop-modal-title" style="max-width:760px">
+      <header class="modal-head">
+        <h3 id="crop-modal-title">✂️ قص وتأطير الصورة</h3>
+        <button class="btn sm icon-btn" id="crop-modal-close" aria-label="إغلاق">✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="hint">اسحب المقبض لتغيير منطقة القص. اختر النسبة لمطابقة أبعاد الجدار، أو اتركها حرة.</p>
+        <div class="crop-toolbar">
+          <label>
+            <span>نسبة العرض/الارتفاع:</span>
+            <select id="crop-aspect">
+              <option value="free">حرة</option>
+              <option value="2.0">2 : 1 (جدار طويل)</option>
+              <option value="1.5">3 : 2</option>
+              <option value="1.33">4 : 3</option>
+              <option value="1.0">1 : 1 (مربع)</option>
+              <option value="0.5">1 : 2 (جدار طويل/رأسي)</option>
+              <option value="auto">تلقائي (من الجدار)</option>
+            </select>
+          </label>
+          <button class="btn sm" id="crop-reset" title="إعادة الإطار للكامل">↺ كامل الصورة</button>
+        </div>
+        <div class="crop-stage" id="crop-stage">
+          <canvas id="crop-canvas"></canvas>
+          <div id="crop-frame" class="crop-frame">
+            <span class="crop-handle" data-h="nw"></span>
+            <span class="crop-handle" data-h="ne"></span>
+            <span class="crop-handle" data-h="sw"></span>
+            <span class="crop-handle" data-h="se"></span>
+          </div>
+        </div>
+        <p class="hint" id="crop-info"></p>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn" id="crop-cancel">إلغاء</button>
+        <button class="btn primary" id="crop-apply">تطبيق</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Room layouts modal (named A/B/C savepoints) -->
   <div class="modal-backdrop" id="layouts-modal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="layouts-modal-title">
@@ -394,6 +455,8 @@
   <script src="js/dxf-import.js"></script>
   <script src="js/color-picker.js"></script>
   <script src="js/shape-editor.js"></script>
+  <script src="js/wall-storage.js"></script>
+  <script src="js/wallpaper-presets.js"></script>
   <script src="js/wall-photo.js"></script>
   <script src="js/app.js"></script>
   <script type="module" src="js/three-view.js"></script>

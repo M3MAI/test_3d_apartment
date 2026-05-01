@@ -1,5 +1,5 @@
 // Minimal offline-first service worker (cache-on-install + stale-while-revalidate).
-const CACHE = "apt-v6";
+const CACHE = "apt-v9";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,9 @@ const ASSETS = [
   "./js/furniture.js",
   "./js/custom-items.js",
   "./js/dxf-import.js",
+  "./js/wall-storage.js",
+  "./js/wallpaper-presets.js",
+  "./js/wall-photo.js",
   "./js/app.js",
   "./js/three-view.js",
   "./manifest.webmanifest",
