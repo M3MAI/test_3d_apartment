@@ -1,5 +1,13 @@
 // Minimal offline-first service worker (cache-on-install + stale-while-revalidate).
-const CACHE = "apt-v9";
+//
+// IMPORTANT: We deliberately do NOT call `self.skipWaiting()` from `install`
+// anymore. When a new service-worker is installed while the page is open, the
+// browser keeps it in "waiting" state until all tabs close. Our index.html
+// detects `installed` + existing controller, shows an "update available"
+// banner, and the user clicks "تحديث" — which postMessages SKIP_WAITING here
+// and the new SW takes over on the next reload (driven by `controllerchange`
+// in the page).
+const CACHE = "apt-v10";
 const ASSETS = [
   "./",
   "./index.html",
@@ -20,7 +28,14 @@ self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(CACHE).then((c) => c.addAll(ASSETS).catch(() => {}))
   );
-  self.skipWaiting();
+  // No `self.skipWaiting()` here on purpose — the page surfaces an update
+  // toast and only invokes `skipWaiting` when the user accepts it.
+});
+
+self.addEventListener("message", (e) => {
+  if (e && e.data && e.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (e) => {

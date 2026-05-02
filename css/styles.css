@@ -546,8 +546,32 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 
 #btn-measure.active { background: #ffdd57; color: #3b2d00; }
 
+/* ---------- Service-worker update banner ---------- */
+.sw-update-toast {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--panel, #fff);
+  color: var(--fg, #1a1a1a);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.15);
+  font-size: 13px;
+  z-index: 9999;
+}
+.sw-update-toast[hidden] { display: none; }
+
 /* ---------- Room editor / shortcuts / layouts modals ---------- */
 #room-modal .fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
+#room-modal .fields-row.ceiling-row { grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+#room-modal .field.check { flex-direction: row; align-items: center; gap: 6px; padding-top: 6px; }
+#room-modal .field.check input[type="checkbox"] { width: 16px; height: 16px; }
+#room-modal .field.check span { font-size: 13px; }
 .field-label { margin: 12px 0 6px 0; font-size: 14px; font-weight: 600; }
 .openings-list { display: flex; flex-direction: column; gap: 6px; }
 .opening-row {

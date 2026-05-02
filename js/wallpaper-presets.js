@@ -370,5 +370,22 @@
   function list() { return PRESETS.slice(); }
   function getById(id) { return PRESETS.find(p => p.id === id); }
 
-  window.WallpaperPresets = { list, getById, buildDataUrl, getThumb, buildSettings };
+  // Pre-builds all 16 thumbnails during browser idle time so the gallery modal
+  // opens with zero stutter. Each preset takes ~10 ms; we yield between
+  // builds to keep the main thread responsive (audit C-14).
+  function prewarmThumbs() {
+    const ids = PRESETS.map(p => p.id);
+    let i = 0;
+    const idle = window.requestIdleCallback || function (cb) { return setTimeout(() => cb({ timeRemaining: () => 16 }), 16); };
+    function step(deadline) {
+      while (i < ids.length && deadline.timeRemaining() > 4) {
+        if (!_thumbCache.has(ids[i])) getThumb(ids[i]);
+        i++;
+      }
+      if (i < ids.length) idle(step);
+    }
+    idle(step);
+  }
+
+  window.WallpaperPresets = { list, getById, buildDataUrl, getThumb, buildSettings, prewarmThumbs };
 })();

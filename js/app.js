@@ -145,6 +145,12 @@ function applyRoomOverrides() {
     if (o.wallTextures) r.wallTextures = o.wallTextures;
     if (o.wallTextureSettings) r.wallTextureSettings = o.wallTextureSettings;
     if (o.vertices && Array.isArray(o.vertices)) r.vertices = o.vertices;
+    // Ceiling override: shallow-merge the keys the user is allowed to tweak
+    // (tray, cove, coveColor, downlights, height, rose). A full assignment
+    // would let an empty {} accidentally erase the room's defaults.
+    if (o.ceiling && typeof o.ceiling === "object") {
+      r.ceiling = { ...(r.ceiling || {}), ...o.ceiling };
+    }
   });
 }
 // Hydrate wall photos + per-wall settings into ROOMS from IndexedDB. Called
@@ -602,6 +608,19 @@ function installModalFocusTrap() {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+// Coalesces multiple `drawRoom()` requests inside the same animation frame
+// into one. Boot fires up to 3 redraws (sync tail + CustomItems.init + WallStorage.init);
+// without coalescing the user can see the scene flicker as each finishes.
+let _redrawScheduled = false;
+function scheduleRedraw() {
+  if (_redrawScheduled) return;
+  _redrawScheduled = true;
+  requestAnimationFrame(() => {
+    _redrawScheduled = false;
+    drawRoom();
+  });
+}
+
 // ---------- Init ----------
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
@@ -614,7 +633,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.CustomItems && typeof window.CustomItems.init === "function") {
     window.CustomItems.init().then(() => {
       renderCatalog();
-      drawRoom();
+      scheduleRedraw();
     });
   }
   // Hydrate wall photos from IDB (with one-time migration from localStorage).
@@ -623,7 +642,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.WallStorage && typeof window.WallStorage.init === "function") {
     window.WallStorage.init().then(() => {
       applyWallStorageToRooms();
-      drawRoom();
+      scheduleRedraw();
     });
   }
   bindTopbar();
@@ -658,6 +677,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   bindOnboarding();
   installModalFocusTrap();
+  if (window.WallpaperPresets && typeof window.WallpaperPresets.prewarmThumbs === "function") {
+    window.WallpaperPresets.prewarmThumbs();
+  }
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
   if (last && ROOMS.find(r => r.id === last)) selectRoom(last);
@@ -2709,6 +2731,13 @@ function bindRoomModal() {
     document.getElementById("re-wall-right").value  = wc.right  || (room.accentWall === "right"  && room.accentColor ? room.accentColor : fallback);
     document.getElementById("re-floor").value = room.floorTexture || "default";
     document.getElementById("re-wallmat").value = room.wallTexture || "default";
+    // Ceiling controls (tray / cove / rose / cove color / downlight count).
+    const c = room.ceiling || {};
+    document.getElementById("re-ceil-tray").checked       = !!c.tray;
+    document.getElementById("re-ceil-cove").checked       = !!c.cove;
+    document.getElementById("re-ceil-rose").checked       = !!c.rose;
+    document.getElementById("re-ceil-cove-color").value   = c.coveColor || "#FFCE7A";
+    document.getElementById("re-ceil-downlights").value   = (c.downlights ?? "");
     document.getElementById("re-error").hidden = true;
     // Load existing wall photos + per-wall texture settings into the new UI.
     if (window.WallPhoto) window.WallPhoto.populate(room);
@@ -2823,6 +2852,18 @@ function bindRoomModal() {
     const floorTexture = document.getElementById("re-floor").value;
     const wallTexture  = document.getElementById("re-wallmat").value;
     const openings = readOpeningsList();
+    // Collect ceiling configuration. Empty downlights field == use default,
+    // not "0 lights" — distinguish via Number.isFinite.
+    const dlRaw = document.getElementById("re-ceil-downlights").value;
+    const dlNum = dlRaw === "" ? null : Math.max(0, Math.min(24, parseInt(dlRaw, 10)));
+    const ceiling = {
+      tray:      document.getElementById("re-ceil-tray").checked,
+      cove:      document.getElementById("re-ceil-cove").checked,
+      rose:      document.getElementById("re-ceil-rose").checked,
+      coveColor: document.getElementById("re-ceil-cove-color").value,
+      height:    h,
+    };
+    if (Number.isFinite(dlNum)) ceiling.downlights = dlNum;
     const room = ROOMS.find(r => r.id === editingRoomId);
     if (!room) return;
     room.name = name;
@@ -2834,6 +2875,7 @@ function bindRoomModal() {
     room.floorTexture = floorTexture;
     room.wallTexture = wallTexture;
     room.openings = openings;
+    room.ceiling = ceiling;
     // Collect wall photo textures + per-wall settings (fit / tile / brightness
     // / contrast). The new WallPhoto module owns this state — it persists
     // photos across reopen/save cycles, supports remove, and exposes a single
@@ -2862,6 +2904,7 @@ function bindRoomModal() {
       name, width: w, depth: d, height: h,
       wallColor, wallColors,
       floorTexture, wallTexture, openings, plan: room.plan,
+      ceiling,
     };
     if (!persistRoomOverridesSafely(ov)) return; // quota error already toasted.
     // Persist photos to IDB asynchronously. We don't await here so the modal

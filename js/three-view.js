@@ -130,25 +130,16 @@ function show(container, opts) {
   // when room.floorTexture === "tile-cream", a procedural tile texture is used.
   const useTile = room.floorTexture === "tile-cream";
   const floorMatOpts = useTile
-    ? { map: getTileCreamTexture() }
+    ? { map: getTileCreamTexture(room.width, room.depth) }
     : { color: hexToInt(room.floorColor || "#e6ddcf") };
   const floorMat = new THREE.MeshBasicMaterial(floorMatOpts);
   let floor;
   if (room.vertices && room.vertices.length >= 3) {
     const fGeo = new THREE.ShapeGeometry(shapeFromVertices(room.vertices));
-    if (useTile) {
-      // Repeat the 256px texture every ~120cm of room space.
-      const tex = floorMat.map;
-      tex.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
-    }
     floor = new THREE.Mesh(fGeo, floorMat);
     floor.rotation.x = Math.PI / 2;
     floor.position.set(0, 0, 0);
   } else {
-    if (useTile) {
-      const tex = floorMat.map;
-      tex.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
-    }
     const floorGeo = new THREE.PlaneGeometry(room.width, room.depth);
     floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -698,23 +689,24 @@ function getRoomEdges(room) {
 }
 
 // Builds a tile-cream procedural texture (large beige ceramic tiles with grout
-// lines). Cached so we don't rebuild per call.
-let _tileCreamTexture = null;
-function getTileCreamTexture() {
-  if (_tileCreamTexture) return _tileCreamTexture;
+// lines). The underlying canvas is built once and shared across all instances,
+// but every caller gets its own `Texture` clone so it can set `.repeat`
+// independently. (Pre-fix: multiple rooms in the apartment walkthrough mutated
+// the same singleton's `.repeat` and the last writer won — see audit C-06.)
+let _tileCreamTextureBase = null;
+function _getTileCreamBase() {
+  if (_tileCreamTextureBase) return _tileCreamTextureBase;
   const canvas = document.createElement("canvas");
   canvas.width = 256; canvas.height = 256;
   const ctx2 = canvas.getContext("2d");
   ctx2.fillStyle = "#e6d9c2";
   ctx2.fillRect(0, 0, 256, 256);
-  // Subtle speckle
   for (let i = 0; i < 800; i++) {
     const x = Math.random() * 256, y = Math.random() * 256;
     const a = 0.04 + Math.random() * 0.06;
     ctx2.fillStyle = `rgba(180,160,120,${a})`;
     ctx2.fillRect(x, y, 1, 1);
   }
-  // Grout lines (4 tiles per texture)
   ctx2.strokeStyle = "#c8b896";
   ctx2.lineWidth = 2;
   ctx2.beginPath();
@@ -725,7 +717,18 @@ function getTileCreamTexture() {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.colorSpace = THREE.SRGBColorSpace;
-  _tileCreamTexture = tex;
+  _tileCreamTextureBase = tex;
+  return tex;
+}
+// Returns a fresh Texture sharing the cached canvas source. Caller may set
+// `.repeat` freely without affecting other rooms.
+function getTileCreamTexture(roomWidth, roomDepth) {
+  const base = _getTileCreamBase();
+  const tex = base.clone();
+  tex.needsUpdate = true;
+  if (roomWidth && roomDepth) {
+    tex.repeat.set(Math.max(1, roomWidth / 120), Math.max(1, roomDepth / 120));
+  }
   return tex;
 }
 
@@ -1653,14 +1656,11 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     // Polygon-shaped floor
     const useTile = room.floorTexture === "tile-cream";
     const fMat = useTile
-      ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(), roughness: 0.95 })
+      ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(room.width, room.depth), roughness: 0.95 })
       : new THREE.MeshStandardMaterial({
           color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
           roughness: 0.95,
         });
-    if (useTile) {
-      fMat.map.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
-    }
     const fGeo = new THREE.ShapeGeometry(shapeFromVertices(room.vertices));
     const fMesh = new THREE.Mesh(fGeo, fMat);
     fMesh.rotation.x = Math.PI / 2;
@@ -1726,14 +1726,11 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
   // Floor tile for this room — uses floorColor or tile-cream texture.
   const useTile = room.floorTexture === "tile-cream";
   const fMat = useTile
-    ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(), roughness: 0.95 })
+    ? new THREE.MeshStandardMaterial({ map: getTileCreamTexture(room.width, room.depth), roughness: 0.95 })
     : new THREE.MeshStandardMaterial({
         color: hexToInt(room.floorColor || lighterHex(room.wallColor, 0.25)),
         roughness: 0.95,
       });
-  if (useTile) {
-    fMat.map.repeat.set(Math.max(1, room.width / 120), Math.max(1, room.depth / 120));
-  }
   const fGeo = new THREE.PlaneGeometry(room.width, room.depth);
   const fMesh = new THREE.Mesh(fGeo, fMat);
   fMesh.rotation.x = -Math.PI / 2;
