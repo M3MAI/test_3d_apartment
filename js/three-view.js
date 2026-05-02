@@ -882,6 +882,43 @@ if (typeof window !== "undefined") {
   window._aptWallPhotoCache = _wallPhotoCache;
 }
 
+// ---------------------------------------------------------------------------
+// Opening hole geometry — shared between rectangular and polygon wall builders.
+// ---------------------------------------------------------------------------
+// Adds a `THREE.Path` for one opening to the `holes` array.
+//   lo, hi : start/end of the opening along the wall's local axis (cm)
+//   H      : wall height (cm)
+//   op     : the opening object — uses op.kind ("door"|"window") and
+//            optionally op.arched (segmental arch top instead of flat lintel).
+//
+// Door height ≈ 210 cm, window sill 90 cm + top 220 cm. When `op.arched` is
+// true on a door, the top edge becomes a parabolic arch with rise = min(50, width/4).
+function _addOpeningHole(holes, op, lo, hi, H) {
+  const isDoor = op.kind === "door";
+  const y0 = isDoor ? 0 : 90;
+  const y1 = isDoor ? Math.min(210, H - 10) : Math.min(220, H - 10);
+  const hole = new THREE.Path();
+  if (op.arched && isDoor) {
+    const archRise = Math.min(50, (hi - lo) / 4);
+    const archStart = Math.max(y0 + 1, y1 - archRise);
+    const mid = (lo + hi) / 2;
+    hole.moveTo(lo, y0);
+    hole.lineTo(hi, y0);
+    hole.lineTo(hi, archStart);
+    // Quadratic Bezier from (hi, archStart) over (mid, archStart + 2*archRise)
+    // to (lo, archStart). The curve's apex is at (mid, archStart + archRise) = (mid, y1).
+    hole.quadraticCurveTo(mid, archStart + 2 * archRise, lo, archStart);
+    hole.lineTo(lo, y0);
+  } else {
+    hole.moveTo(lo, y0);
+    hole.lineTo(hi, y0);
+    hole.lineTo(hi, y1);
+    hole.lineTo(lo, y1);
+    hole.lineTo(lo, y0);
+  }
+  holes.push(hole);
+}
+
 // Builds a Shape from polygon vertices (in cm).
 function shapeFromVertices(verts) {
   const shape = new THREE.Shape();
@@ -939,17 +976,7 @@ function buildWalls(scene, room) {
 
     const holes = [];
     (room.openings || []).filter(o => o.wall === w.wall).forEach(o => {
-      const x0 = o.at;
-      const x1 = o.at + o.size;
-      const y0 = o.kind === "door" ? 0 : 90;
-      const y1 = o.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
-      const hole = new THREE.Path();
-      hole.moveTo(x0, y0);
-      hole.lineTo(x1, y0);
-      hole.lineTo(x1, y1);
-      hole.lineTo(x0, y1);
-      hole.lineTo(x0, y0);
-      holes.push(hole);
+      _addOpeningHole(holes, o, o.at, o.at + o.size, H);
     });
     shape.holes = holes;
 
@@ -1017,15 +1044,7 @@ function buildWallsFromVertices(scene, room, useStandard, offX, offZ, collidable
       const range = openingToLocalEdgeRange(op, e);
       if (!range) return;
       const [lo, hi] = range;
-      const y0 = op.kind === "door" ? 0 : 90;
-      const y1 = op.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
-      const hole = new THREE.Path();
-      hole.moveTo(lo, y0);
-      hole.lineTo(hi, y0);
-      hole.lineTo(hi, y1);
-      hole.lineTo(lo, y1);
-      hole.lineTo(lo, y0);
-      holes.push(hole);
+      _addOpeningHole(holes, op, lo, hi, H);
     });
     shape.holes = holes;
 
@@ -1449,22 +1468,19 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // Build each room with an offset matching its plan coords
+  // Build each room with an offset matching its plan coords. Items live in a
+  // dedicated group so they can be reconciled (added/removed/updated) without
+  // tearing down the whole scene on every layout change.
   const collidables = []; // wall meshes for player collision
+  const roomOffsets = new Map(); // roomId -> [ox, oz]
+  const furnitureGroup = new THREE.Group();
+  furnitureGroup.name = "apt-furniture";
+  scene.add(furnitureGroup);
   rooms.forEach(room => {
     const ox = ((room.plan && room.plan.x) || 0) - bounds.minX;
     const oz = ((room.plan && room.plan.y) || 0) - bounds.minY;
+    roomOffsets.set(room.id, [ox, oz]);
     buildRoomAt(scene, room, ox, oz, collidables);
-    const items = (itemsByRoom && itemsByRoom[room.id]) || [];
-    items.forEach(inst => {
-      const item = findItem(inst.groupId, inst.itemId);
-      if (!item) return;
-      const mesh = buildFurnitureMesh(inst, item);
-      if (!mesh) return;
-      mesh.position.x += ox;
-      mesh.position.z += oz;
-      scene.add(mesh);
-    });
   });
 
   // Start at the apartment entrance (first room's door-facing side)
@@ -1515,6 +1531,9 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
     rooms, itemsByRoom, findItem,
     bounds, collidables, sun, ambient,
     prompt,
+    furnitureGroup,
+    roomOffsets,
+    itemMeshes: new Map(), // "roomId/instId" -> mesh
     cleanup: () => {
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("keyup", onKeyUp);
@@ -1522,6 +1541,8 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
       prompt.remove();
     },
   };
+
+  reconcileApartmentItems(aptCtx, itemsByRoom, findItem);
 
   aptCtx.resizeObs = new ResizeObserver(() => {
     const w = container.clientWidth, h = container.clientHeight;
@@ -1563,11 +1584,65 @@ function isActiveApartment() {
 }
 function updateApartmentItems(itemsByRoom, findItem) {
   if (!aptCtx) return;
-  // Simple approach: rebuild entire scene — walkthrough is viewed less often.
-  const container = aptCtx.renderer.domElement.parentElement;
-  const rooms = aptCtx.rooms;
-  hideApartment();
-  if (container) showApartment(container, { rooms, itemsByRoom, findItem });
+  aptCtx.itemsByRoom = itemsByRoom;
+  if (findItem) aptCtx.findItem = findItem;
+  reconcileApartmentItems(aptCtx, itemsByRoom, aptCtx.findItem);
+}
+
+// Adds/removes/updates only the diff vs the currently-rendered furniture set.
+// Walls, floors and lights are NOT touched — they live outside `furnitureGroup`.
+//
+// Key per mesh: `${roomId}/${instId}`. Signature reuses the same shape as the
+// single-room reconciler so material/geometry rebuilds happen for the same
+// reasons (dimension overrides, color override, etc.) and pure-transform
+// changes (position/rotation) only call `applyInstTransform`.
+function reconcileApartmentItems(ctx, itemsByRoom, findItem) {
+  if (!ctx || !ctx.furnitureGroup) return;
+  const seen = new Set();
+  const offsets = ctx.roomOffsets;
+  const meshes = ctx.itemMeshes;
+
+  Object.keys(itemsByRoom || {}).forEach(roomId => {
+    const off = offsets.get(roomId);
+    if (!off) return; // unknown room (shouldn't happen)
+    const [ox, oz] = off;
+    const list = itemsByRoom[roomId] || [];
+    list.forEach(inst => {
+      const item = findItem(inst.groupId, inst.itemId);
+      if (!item) return;
+      const key = roomId + "/" + inst.instId;
+      seen.add(key);
+      const sig = meshSignature(inst, item);
+      const existing = meshes.get(key);
+      if (existing && existing.userData.signature === sig) {
+        applyInstTransform(existing, inst, item);
+        existing.position.x += ox;
+        existing.position.z += oz;
+      } else {
+        if (existing) {
+          ctx.furnitureGroup.remove(existing);
+          disposeObj(existing);
+          meshes.delete(key);
+        }
+        const mesh = buildFurnitureMesh(inst, item);
+        if (!mesh) return;
+        mesh.userData.instId = inst.instId;
+        mesh.userData.roomId = roomId;
+        mesh.userData.signature = sig;
+        mesh.position.x += ox;
+        mesh.position.z += oz;
+        meshes.set(key, mesh);
+        ctx.furnitureGroup.add(mesh);
+      }
+    });
+  });
+
+  for (const [key, mesh] of meshes) {
+    if (seen.has(key)) continue;
+    ctx.furnitureGroup.remove(mesh);
+    disposeObj(mesh);
+    meshes.delete(key);
+  }
 }
 
 // Build a room (walls + openings) with an offset into a shared scene.
@@ -1625,13 +1700,7 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
 
     const holes = [];
     (room.openings || []).filter(o => o.wall === w.wall).forEach(o => {
-      const x0 = o.at;
-      const x1 = o.at + o.size;
-      const y0 = o.kind === "door" ? 0 : 90;
-      const y1 = o.kind === "door" ? Math.min(210, H - 10) : Math.min(220, H - 10);
-      const hole = new THREE.Path();
-      hole.moveTo(x0, y0); hole.lineTo(x1, y0); hole.lineTo(x1, y1); hole.lineTo(x0, y1); hole.lineTo(x0, y0);
-      holes.push(hole);
+      _addOpeningHole(holes, o, o.at, o.at + o.size, H);
     });
     shape.holes = holes;
 

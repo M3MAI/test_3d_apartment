@@ -84,7 +84,7 @@ const ROOMS = [
     depth: 350,
     openings: [
       { wall: "top",    at: 50,  size: 200, kind: "door",   label: "فتحة على الصالون" },
-      { wall: "right",  at: 80,  size: 110, kind: "door",   label: "فتحة مقوّسة على الممر" },
+      { wall: "right",  at: 80,  size: 110, kind: "door",   arched: true, label: "فتحة مقوّسة على الممر" },
       { wall: "left",   at: 120, size: 130, kind: "window", label: "شباك" },
     ],
     allowedCategories: ["living", "common"]

@@ -509,6 +509,99 @@ function allGroups() {
   return groups;
 }
 
+// ---------- Modal focus-trap (A11y) ----------
+// Watches every `.modal-backdrop` for `hidden` toggles. When a modal opens we:
+//   1. remember `document.activeElement` to restore on close,
+//   2. focus the first focusable element inside the dialog,
+//   3. trap Tab / Shift-Tab so focus stays inside,
+//   4. close the modal on Escape (by clicking its `*-modal-close` button so
+//      the existing close logic still runs).
+//
+// Designed to be additive: existing modal open/close code is untouched.
+function installModalFocusTrap() {
+  const FOCUSABLE_SELECTOR = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled]):not([type='hidden'])",
+    "textarea:not([disabled])",
+    "select:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+  const trapState = new WeakMap();
+
+  function visibleFocusables(root) {
+    return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR))
+      .filter(el => !el.hidden && el.offsetParent !== null);
+  }
+
+  function activate(backdrop) {
+    if (trapState.has(backdrop)) return;
+    const dialog = backdrop.querySelector(".modal[role='dialog']") || backdrop;
+    const returnTo = document.activeElement;
+    const list = visibleFocusables(dialog);
+    if (list.length) {
+      try { list[0].focus({ preventScroll: true }); } catch { list[0].focus(); }
+    } else {
+      try { dialog.setAttribute("tabindex", "-1"); dialog.focus(); } catch (_) {}
+    }
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        const closeBtn = backdrop.querySelector("[id$='-modal-close']")
+          || backdrop.querySelector(".icon-btn[aria-label='إغلاق']");
+        if (closeBtn) closeBtn.click(); else backdrop.hidden = true;
+        e.preventDefault();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const cur = visibleFocusables(dialog);
+      if (cur.length === 0) { e.preventDefault(); return; }
+      const first = cur[0], last = cur[cur.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dialog.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    backdrop.addEventListener("keydown", onKey);
+    trapState.set(backdrop, { returnTo, onKey });
+  }
+
+  function deactivate(backdrop) {
+    const s = trapState.get(backdrop);
+    if (!s) return;
+    backdrop.removeEventListener("keydown", s.onKey);
+    trapState.delete(backdrop);
+    if (s.returnTo && document.contains(s.returnTo)) {
+      try { s.returnTo.focus({ preventScroll: true }); } catch { s.returnTo.focus(); }
+    }
+  }
+
+  function watch(bd) {
+    if (!bd.hidden) activate(bd);
+    new MutationObserver(records => {
+      for (const r of records) {
+        if (r.attributeName !== "hidden") continue;
+        if (bd.hidden) deactivate(bd); else activate(bd);
+      }
+    }).observe(bd, { attributes: true, attributeFilter: ["hidden"] });
+  }
+
+  document.querySelectorAll(".modal-backdrop").forEach(watch);
+
+  new MutationObserver(records => {
+    for (const r of records) {
+      r.addedNodes && r.addedNodes.forEach(n => {
+        if (n.nodeType === 1 && n.classList && n.classList.contains("modal-backdrop")) {
+          watch(n);
+        }
+      });
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 // ---------- Init ----------
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
@@ -564,6 +657,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindCropModal();
   }
   bindOnboarding();
+  installModalFocusTrap();
 
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
   if (last && ROOMS.find(r => r.id === last)) selectRoom(last);
