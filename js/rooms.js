@@ -105,7 +105,13 @@ const ROOMS = [
       left:   "#F5F5F5",
       right:  "#F5F5F5",
     },
-    floorColor: "#e8e8e8",
+    // Floor: same cream-marble tile as the rest of the apartment
+    // (audit Q-B §4.4 — the room is not on a separate flooring system).
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
+    // Ceiling: plaster rose / medallion is clearly visible in the reference
+    // video at AUDIT_FRAMES/old/t_030.png and t_035.png. No tray / cove.
+    ceiling: { rose: true },
     description: "غرفة نوم بحائط أزرق بترولي مميز على واحد من الجدران والباقي أبيض.",
     plan: { x: 460, y: 570 },
     width: 400,
@@ -129,7 +135,9 @@ const ROOMS = [
       left:   "#4A9FB5",
       right:  "#F5F5F5",
     },
-    floorColor: "#e8e8e8",
+    // Floor: same cream-marble tile as the rest of the apartment.
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
     description: "غرفة أصغر مناسبة للأطفال بلون تركواز مميز.",
     plan: { x: 870, y: 620 },
     width: 350,
@@ -156,7 +164,11 @@ const ROOMS = [
       left:   "#C4A0A5",   // rose/mauve side wall
       right:  "#C4A0A5",   // rose/mauve side wall
     },
-    floorColor: "#e8dfd0",
+    // Floor: same cream-marble tile as the rest of the apartment
+    // (the deep red carpet seen in the reference video is a temporary
+    // celebration covering, not a design choice).
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
     description: "غرفة نوم رئيسية بجدران وردية دافئة (موف) والباقي أبيض.",
     plan: { x: 0, y: 570 },
     width: 450,
@@ -182,7 +194,10 @@ const ROOMS = [
       left:   "#A8C4DE",
       right:  "#A8C4DE",
     },
-    floorColor: "#ece3d2",
+    // Floor: same cream-marble tile as the rest of the apartment
+    // (continuous from the corridor through the kitchen door).
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
     description: "المطبخ — جدران سماوي فاتح وشريط بلاط أخضر.",
     plan: { x: 970, y: 0 },
     width: 300,

@@ -744,7 +744,37 @@ function getTileCreamTexture() {
 //   * tile     — repeat texture tileX × tileY across the wall.
 //   * brightness/contrast — applied via offscreen canvas filter once on creation.
 // ---------------------------------------------------------------------------
+// LRU-bounded wall-photo texture cache.
+//
+// Why LRU + dispose: the previous implementation was an unbounded `Map` which
+// leaked GPU memory whenever the user tweaked sliders (every brightness/
+// contrast/blend tweak creates a new cache entry; old textures were never
+// disposed). The cache now caps at WALL_PHOTO_CACHE_MAX entries; on insertion
+// the oldest entry is evicted and its `THREE.Texture` is disposed.
+//
+// Sizing: the worst realistic in-flight count is 8 rooms × 4 walls = 32
+// distinct textures, but in practice most rooms reuse defaults / share photos.
+// 24 is generous without being wasteful.
+const WALL_PHOTO_CACHE_MAX = 24;
 const _wallPhotoCache = new Map();
+function _wallPhotoCacheTouch(key) {
+  // LRU bump: re-insert moves the entry to the tail of the Map iteration order.
+  const v = _wallPhotoCache.get(key);
+  _wallPhotoCache.delete(key);
+  _wallPhotoCache.set(key, v);
+  return v;
+}
+function _wallPhotoCacheInsert(key, tex) {
+  _wallPhotoCache.set(key, tex);
+  while (_wallPhotoCache.size > WALL_PHOTO_CACHE_MAX) {
+    const oldestKey = _wallPhotoCache.keys().next().value;
+    const oldestTex = _wallPhotoCache.get(oldestKey);
+    _wallPhotoCache.delete(oldestKey);
+    if (oldestTex && typeof oldestTex.dispose === "function") {
+      try { oldestTex.dispose(); } catch (_) { /* already disposed */ }
+    }
+  }
+}
 function _wallPhotoSig(dataUrl, settings, wallColor) {
   // Hash data URL by (length + first/last 32 chars) — collision-resistant
   // enough for practical use, far cheaper than hashing the entire string.
@@ -765,13 +795,33 @@ const _BLEND_OPS = {
   lighten:      "lighten",
   color:        "color",   // tint by hue+sat of wall color
 };
+// 1×1 white placeholder canvas reused across all in-flight wall-photo textures.
+// Without it, a freshly created THREE.Texture has `image: undefined` which the
+// shader samples as transparent black — producing a brief "flash of black" on
+// every wall while the real <img> loads. Seeding with white-pixel preserves
+// the wall's solid color (multiplied with map=#ffffff) until the photo is in.
+let _wallPhotoPlaceholder = null;
+function _getWallPhotoPlaceholder() {
+  if (_wallPhotoPlaceholder) return _wallPhotoPlaceholder;
+  const c = document.createElement("canvas");
+  c.width = 1; c.height = 1;
+  const cx = c.getContext("2d");
+  cx.fillStyle = "#ffffff";
+  cx.fillRect(0, 0, 1, 1);
+  _wallPhotoPlaceholder = c;
+  return c;
+}
 function getWallPhotoTexture(dataUrl, settings, wallColor) {
   if (!dataUrl) return null;
   const key = _wallPhotoSig(dataUrl, settings, wallColor);
-  if (_wallPhotoCache.has(key)) return _wallPhotoCache.get(key);
+  if (_wallPhotoCache.has(key)) return _wallPhotoCacheTouch(key);
   // Build asynchronously on an Image, then bake to a canvas with filter
   // and optional blend mode against the wall's solid color.
-  const tex = new THREE.Texture();
+  // The texture is created up-front (seeded with a 1×1 white pixel so it's
+  // not flash-of-black) so callers get a stable reference for material
+  // assignment; its real .image is swapped in once the <img> resolves.
+  const tex = new THREE.Texture(_getWallPhotoPlaceholder());
+  tex.needsUpdate = true;
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -808,7 +858,13 @@ function getWallPhotoTexture(dataUrl, settings, wallColor) {
     tex.image = canvas;
     tex.needsUpdate = true;
   };
-  img.onerror = () => { /* swallow — wall just falls back to its color */ };
+  img.onerror = () => {
+    // The texture stays at its 1×1 white placeholder. Tag it so we can drop
+    // failed entries from the cache on the next sweep instead of holding
+    // onto unusable textures.
+    tex.userData = tex.userData || {};
+    tex.userData.loadFailed = true;
+  };
   img.src = dataUrl;
   const fit = (settings && settings.fit) || "cover";
   if (fit === "tile") {
@@ -818,7 +874,7 @@ function getWallPhotoTexture(dataUrl, settings, wallColor) {
   } else {
     tex.repeat.set(1, 1);
   }
-  _wallPhotoCache.set(key, tex);
+  _wallPhotoCacheInsert(key, tex);
   return tex;
 }
 // Public for testability/debug.
@@ -1022,7 +1078,9 @@ function buildCeiling(scene, room, useStandard, offX, offZ) {
   const H = wallH(room);
   const cfg = (typeof room.ceiling === "object") ? room.ceiling : {};
   const coveColor = cfg.coveColor || "#FFD27A";
-  const downlights = Math.max(0, cfg.downlights | 0 || 6);
+  // Nullish coalescing: explicit `downlights: 0` truly disables them
+  // (the previous `cfg.downlights | 0 || 6` masked an explicit 0 → 6).
+  const downlights = Math.max(0, Math.floor(cfg.downlights ?? 6));
 
   const group = new THREE.Group();
   group.name = "ceiling";
