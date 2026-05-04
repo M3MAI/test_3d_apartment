@@ -5,11 +5,23 @@
 //   at:   cm from the start of the wall (near origin corner)
 //   size: cm width of the opening
 //   kind: "door" | "window"
+//   arched: true → segmental-arch top on a door opening (living room only)
 //
 // wallColors: per-wall color overrides. Keys: "top" | "right" | "bottom" | "left".
 //   Falls back to wallColor (ambient) if a wall isn't specified.
 //   When wallColors is defined, accentColor/accentWall are still respected for
 //   backward compat but wallColors takes priority.
+//
+// ceiling: { tray, cove, coveColor, downlights, rose }
+//   tray:       true → drop tray ceiling + 4 white side strips
+//   cove:       true → warm-amber LED cove strip around tray perimeter
+//   coveColor:  hex string for the LED glow (default #FFCE7A warm amber)
+//   downlights: number of recessed spots inside the tray (0 = none)
+//   rose:       true → ornate plaster ceiling rose medallion at centre
+//
+// SOURCE: apartment_video.mp4 (72 s, 848×480) + new_apartment_video.mp4 (21 s, 1080×1920)
+// All claims cross-referenced against docs/AUDIT_FRAMES/ (94 extracted frames).
+// See docs/ANALYSIS_v2.md and docs/AUDIT_REPORT.md for full audit trail.
 
 // Helper: resolves the color for a given wall, respecting wallColors > accentColor > wallColor.
 function resolveWallColor(room, wallId) {
@@ -18,115 +30,216 @@ function resolveWallColor(room, wallId) {
   return room.wallColor || "#eeeeee";
 }
 
+// ---------------------------------------------------------------------------
+// PLAN COORDINATE SYSTEM (all values in cm)
+//
+//   Salon       : x=0,    y=0      (500×400)
+//   Living      : x=0,    y=410    (500×350)
+//   Corridor    : x=510,  y=0      (150×760)  ← new: links entry→salon→living→bedrooms
+//   Kitchen     : x=670,  y=0      (300×250)
+//   Master BR   : x=0,    y=770    (450×350)
+//   Bathroom M  : x=510,  y=410    (250×200)
+//   WC          : x=510,  y=620    (150×150)
+//   Bedroom Blue: x=670,  y=410    (400×350)
+//   Bedroom Teal: x=670,  y=770    (350×300)
+//
+//  y↓  (depth grows downward in the plan view)
+//  x→
+// ---------------------------------------------------------------------------
+
 const ROOMS = [
+
+  // ── 1. CORRIDOR / FOYER (الممر والمدخل) ─────────────────────────────────
+  // new/t_001.png: Dark wood ornate entry door; mint corridor walls; narrow
+  // tray ceiling running the full length; ~5 white recessed downlights;
+  // continuous cream tile floor.
+  // new/t_022.png: inner end of corridor — dark-wood bedroom doors on right,
+  // arched opening from living room visible at left.
+  {
+    id: "corridor",
+    name: "الممر والمدخل",
+    color: "#BFD6D8",
+    wallColor: "#BFD6D8",        // same celadon mint as the public rooms
+    wallColors: {
+      top:    "#BFD6D8",
+      bottom: "#BFD6D8",
+      left:   "#BFD6D8",
+      right:  "#BFD6D8",
+    },
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
+    // Narrow tray running the corridor length: 5 downlights, no cove LED,
+    // no rose. Crown molding continues from salon/living.
+    ceiling: { tray: true, cove: false, downlights: 5, height: 270 },
+    description: "الممر الرئيسي للشقة — جدران مينت سيلادون، سقف معلق ضيق بـ 5 سبوتات مدفونة، بلاط كريم متواصل من الصالون حتى الغرف. الباب الرئيسي: خشب داكن مع زخارف حديدية.",
+    plan: { x: 510, y: 0 },
+    width: 150,
+    depth: 760,
+    openings: [
+      // Entry (apartment front door) — top wall, centred
+      { wall: "top",    at: 25,  size: 100, kind: "door",   label: "الباب الرئيسي" },
+      // Salon French door opens into corridor — left wall
+      { wall: "left",   at: 160, size: 180, kind: "door",   label: "باب الصالون (فرنسي)" },
+      // Kitchen door — right wall, facing the salon door
+      { wall: "right",  at: 60,  size: 85,  kind: "door",   label: "باب المطبخ" },
+      // Passage to living room via arched opening — left wall, lower
+      { wall: "left",   at: 490, size: 110, kind: "door",   arched: true, label: "فتحة مقوّسة للمعيشة" },
+      // Bedroom corridor continues downward — bottom wall (open pass-through)
+      { wall: "bottom", at: 20,  size: 110, kind: "door",   label: "ممر الغرف" },
+    ],
+    allowedCategories: ["common"],
+  },
+
+  // ── 2. SALON / RECEPTION (الصالون) ───────────────────────────────────────
+  // new/t_003–t_008: Clean rectangular footprint; three mint walls + ONE
+  // denim-blue accent wall (top/north) holding the white triple-panel French
+  // door. Tray + warm amber cove + 8 downlights + crown molding. No rose.
+  // new/t_006: French door clearly a 3-panel white door with horizontal
+  // louvered glass panels and brass handle.
+  // Balcony window: left/west wall @150 cm, 180 cm wide (white louvered).
   {
     id: "salon",
     name: "الصالون (Reception)",
-    // New video (new_apartment_video.mp4 @ 00:03-00:08) — deep re-analysis from
-    // 22 extracted frames:
-    //   - Clean rectangular footprint (no protrusion / column).
-    //   - Three light celadon-mint walls + ONE denim-blue accent wall.
-    //   - The accent wall holds a wide WHITE TRIPLE-PANEL FRENCH DOOR with
-    //     louvered shutters — this is the salon's main entrance, facing the
-    //     foyer corridor (kitchen door is opposite across the corridor).
-    //   - Tray ceiling + warm-LED cove + recessed downlights + crown molding.
-    //   - Cream ceramic floor tiles.
-    //   - Exactly ONE window (balcony casement) on the left wall.
     color: "#BFD6D8",
     wallColor: "#BFD6D8",
     wallColors: {
-      top:    "#6892B0",        // accent wall (denim) — holds the French door (faces foyer)
-      bottom: "#BFD6D8",        // mint
-      left:   "#BFD6D8",        // mint (balcony side)
-      right:  "#BFD6D8",        // mint
+      top:    "#6892B0",   // denim-blue accent — holds the French door (faces corridor)
+      bottom: "#BFD6D8",   // mint
+      left:   "#BFD6D8",   // mint (balcony / window side)
+      right:  "#BFD6D8",   // mint
     },
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
     ceiling: { tray: true, cove: true, coveColor: "#FFCE7A", downlights: 8, height: 270 },
-    description: "صالون استقبال الضيوف — حوائط مينت/سيلادون + حائط أزرق ديم يحمل الباب الفرنسي الأبيض ثلاثي البانوهات (يقابل باب المطبخ عبر ممر المدخل)، سقف معلق ساقط بشريط LED أصفر دافئ + سبوتات مدفونة + كورنيش، شباك بلكونة وحيد على الحائط الغربي.",
+    description: "صالون استقبال الضيوف — حائط أزرق ديم يحمل الباب الفرنسي الأبيض الثلاثي البانوهات (يقابل باب المطبخ عبر الممر)، 3 حوائط مينت، سقف ساقط + شريط LED أصفر دافئ + 8 سبوتات + كورنيش، شباك بلكونة على الحائط الغربي.",
     plan: { x: 0, y: 0 },
     width: 500,
     depth: 400,
     openings: [
-      { wall: "top",    at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (يقابل باب المطبخ)" },
+      // French door on the denim accent wall (top) — the salon's main entrance from the corridor.
+      // Width ~180 cm; position 160 cm from the west edge of the top wall.
+      { wall: "top",    at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (3 بانوهات — يقابل باب المطبخ)" },
+      // Wide passage opening to the living room (south/bottom wall)
       { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة على المعيشة" },
-      { wall: "left",   at: 150, size: 180, kind: "window", label: "شباك البلكونة" },
+      // Balcony casement window — west (left) wall, white-framed with louvered glass
+      { wall: "left",   at: 150, size: 180, kind: "window", label: "شباك البلكونة (أبيض — زجاج بلوزي)" },
     ],
-    allowedCategories: ["living", "common"]
+    allowedCategories: ["living", "common"],
   },
+
+  // ── 3. LIVING ROOM (الصالة المعيشة) ──────────────────────────────────────
+  // new/t_013: Large ornate plaster ceiling rose at centre — the room's
+  // signature feature. Tray ceiling + warm amber cove + downlights.
+  // new/t_015: Segmental-arch opening (denim wall, right side) to corridor.
+  // new/t_019: Double-panel white louvered window on denim left wall,
+  // visually centred on the wall (adjusted to 185 cm from corner).
+  // Two denim walls (top + left); two mint walls (bottom + right).
   {
     id: "living",
     name: "الصالة المعيشة",
-    // New video (new_apartment_video.mp4 @ 00:13-00:20) — deep re-analysis:
-    //   - Rectangular footprint (no column / protrusion — vertices removed).
-    //   - Multiple denim-blue walls (top + left) + mint side walls.
-    //   - DISTINCTIVE FEATURE: an ornate plaster CEILING ROSE (medallion) at
-    //     the center of the tray drop — set ceiling.rose=true.
-    //   - Tray ceiling + warm-LED cove + recessed downlights + crown molding.
-    //   - One window (white double-shutter casement) on the left wall.
-    //   - Cream ceramic floor tiles.
-    //   - An arched opening on a corner connects to the inner corridor (frames
-    //     15-16, 22) — represented as a wide wall opening on the right wall.
     color: "#BFD6D8",
     wallColor: "#BFD6D8",
     wallColors: {
-      top:    "#6892B0",        // denim (faces salon — accent)
-      bottom: "#BFD6D8",        // mint (back)
-      left:   "#6892B0",        // denim (balcony / window side — accent)
-      right:  "#BFD6D8",        // mint (corridor / arched opening side)
+      top:    "#6892B0",   // denim (faces salon — shared opening)
+      bottom: "#BFD6D8",   // mint (back wall)
+      left:   "#6892B0",   // denim (window side — balcony direction)
+      right:  "#BFD6D8",   // mint (corridor side — arched opening)
     },
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
+    // rose: true → the large ornate plaster medallion clearly visible in new/t_013 & t_019
     ceiling: { tray: true, cove: true, coveColor: "#FFCE7A", downlights: 8, height: 270, rose: true },
-    description: "صالة المعيشة — حوائط أزرق ديم (شمال + غرب) وحوائط مينت (جنوب + شرق)، سقف معلق ساقط بشريط LED + سبوتات + روزة جبس مزخرفة في المنتصف، شباك واحد على الحائط الغربي، فتحة مقوّسة على الممر الداخلي.",
+    description: "صالة المعيشة — حوائط ديم زرقاء (شمال + غرب) + مينت (جنوب + شرق)، سقف ساقط + LED + 8 سبوتات + روزة جبس مزخرفة في المنتصف، شباك مزدوج مغزلي على الحائط الغربي، فتحة مقوّسة بإطار أبيض على الممر.",
     plan: { x: 0, y: 410 },
     width: 500,
     depth: 350,
     openings: [
-      { wall: "top",    at: 50,  size: 200, kind: "door",   label: "فتحة على الصالون" },
-      { wall: "right",  at: 80,  size: 110, kind: "door",   arched: true, label: "فتحة مقوّسة على الممر" },
-      { wall: "left",   at: 120, size: 130, kind: "window", label: "شباك" },
+      // Wide passage from salon (top wall)
+      { wall: "top",   at: 50,  size: 200, kind: "door",   label: "فتحة على الصالون" },
+      // Segmental-arch opening to corridor (right/east wall).
+      // arched:true triggers the quadratic-bezier arch in _addOpeningHole().
+      // Position: 80 cm from the south corner; width 110 cm.
+      { wall: "right", at: 80,  size: 110, kind: "door",   arched: true, label: "فتحة مقوّسة على الممر — قوس جبسي أبيض" },
+      // Double-panel louvered window on denim left wall.
+      // Adjusted to appear centred: (500 - 130) / 2 ≈ 185 cm from corner.
+      { wall: "left",  at: 185, size: 130, kind: "window", label: "شباك مزدوج (مغزلي أبيض — وسط الحائط الديم)" },
     ],
-    allowedCategories: ["living", "common"]
+    allowedCategories: ["living", "common"],
   },
 
+  // ── 4. MASTER BEDROOM (غرفة ماستر — عنابي/موف) ────────────────────────────
+  // old/t_045: White walls with a pinkish-mauve tint on the right edge.
+  // old/t_050–055: White walls (temporary red carpet covering the cream tile floor).
+  // Side walls (left + right) are warm rose/mauve; front/back are plain white.
+  // Flat ceiling — no tray, no cove. (Unverified whether a rose exists.)
+  {
+    id: "bedroom_master",
+    name: "غرفة ماستر (عنابي)",
+    color: "#C4A0A5",
+    wallColor: "#F5F5F5",
+    accentColor: "#C4A0A5",
+    accentWall: "left",
+    wallColors: {
+      top:    "#F5F5F5",
+      bottom: "#F5F5F5",
+      left:   "#C4A0A5",   // rose/mauve accent side
+      right:  "#C4A0A5",   // rose/mauve accent side
+    },
+    floorColor: "#E8DCC8",
+    floorTexture: "tile-cream",
+    // No tray/cove confirmed. Ceiling rose unverified (old video sideways).
+    description: "غرفة النوم الرئيسية — حائطا الجانبين وردي موف دافئ، الحائطان الأمامي والخلفي أبيض. البلاط كريم رخامي (السجادة الحمراء في الفيديو مؤقتة للمناسبة فقط).",
+    plan: { x: 0, y: 770 },
+    width: 450,
+    depth: 350,
+    openings: [
+      { wall: "right", at: 120, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      { wall: "left",  at: 160, size: 130, kind: "window", label: "شباك أبيض بمغازل" },
+    ],
+    allowedCategories: ["bedroom", "common"],
+  },
+
+  // ── 5. BEDROOM — BLUE (غرفة نوم زرقاء) ─────────────────────────────────
+  // old/t_030: Deep cerulean/teal accent wall (top), white walls, plaster
+  // ceiling rose visible — this is the DEFINITIVE frame for this room.
+  // old/t_035: Same cerulean wall + white-framed louvered window + pipe stub.
+  // Ceiling: flat with ornate plaster rose (no tray, no cove).
+  // Floor: same cream tile as rest of apartment (NOT grey).
   {
     id: "bedroom_blue",
     name: "غرفة نوم زرقاء",
-    // Photo-accurate (bedroom_blue.jpg): ONE wall vivid cerulean/teal blue,
-    // three other walls clean white.
     color: "#2C7DA0",
     wallColor: "#F5F5F5",
     accentColor: "#2C7DA0",
     accentWall: "top",
     wallColors: {
-      top:    "#2C7DA0",   // accent cerulean blue wall
+      top:    "#2C7DA0",   // deep cerulean — more saturated than salon denim
       bottom: "#F5F5F5",
       left:   "#F5F5F5",
       right:  "#F5F5F5",
     },
-    // Floor: same cream-marble tile as the rest of the apartment
-    // (audit Q-B §4.4 — the room is not on a separate flooring system).
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
-    // Ceiling: plaster rose / medallion is clearly visible in the reference
-    // video at AUDIT_FRAMES/old/t_030.png and t_035.png. No tray / cove.
+    // Rose clearly visible in old/t_030 and old/t_035. No tray / no cove.
     ceiling: { rose: true },
-    description: "غرفة نوم بحائط أزرق بترولي مميز على واحد من الجدران والباقي أبيض.",
-    plan: { x: 460, y: 570 },
+    description: "غرفة نوم بحائط بترولي زرقاء مميز (أعمق تشبعاً من الديم في الصالون) + 3 جدران بيضاء. روزة سقف جبسية واضحة في الفيديو. بلاط كريم رخامي متواصل.",
+    plan: { x: 670, y: 410 },
     width: 400,
     depth: 350,
     openings: [
-      { wall: "right",  at: 100, size: 90,  kind: "door",   label: "باب" },
-      { wall: "top",    at: 150, size: 130, kind: "window", label: "شباك" }
+      { wall: "right", at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      { wall: "top",   at: 150, size: 130, kind: "window", label: "شباك (مغزلي أبيض) على الحائط البترولي" },
     ],
-    allowedCategories: ["bedroom", "common"]
+    allowedCategories: ["bedroom", "common"],
   },
+
+  // ── 6. BEDROOM — TEAL (غرفة أطفال تركواز) ────────────────────────────────
+  // LOW CONFIDENCE: no frame unambiguously shows a teal wall. Color scheme
+  // retained from prior analysis (Phase 0 + ANALYSIS.md). Floor corrected to
+  // cream tile (same as rest of apartment).
   {
     id: "bedroom_teal",
     name: "غرفة أطفال (تركواز)",
-    // Photo-accurate (bedroom_teal.jpg): medium turquoise/teal blue walls
-    // with a window — NOT sage green. Actual teal-blue like #4A9FB5.
     color: "#4A9FB5",
     wallColor: "#4A9FB5",
     wallColors: {
@@ -135,109 +248,87 @@ const ROOMS = [
       left:   "#4A9FB5",
       right:  "#F5F5F5",
     },
-    // Floor: same cream-marble tile as the rest of the apartment.
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
-    description: "غرفة أصغر مناسبة للأطفال بلون تركواز مميز.",
-    plan: { x: 870, y: 620 },
+    description: "غرفة صغيرة مناسبة للأطفال بلون تركواز مميز على حائطين (ثقة منخفضة — لا إطار واضح من الفيديو). بلاط كريم متواصل.",
+    plan: { x: 670, y: 770 },
     width: 350,
     depth: 300,
     openings: [
-      { wall: "right",  at: 100, size: 90,  kind: "door",   label: "باب" },
-      { wall: "bottom", at: 130, size: 120, kind: "window", label: "شباك" }
+      { wall: "right",  at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      { wall: "bottom", at: 130, size: 120, kind: "window", label: "شباك" },
     ],
-    allowedCategories: ["bedroom", "common"]
+    allowedCategories: ["bedroom", "common"],
   },
-  {
-    id: "bedroom_master",
-    name: "غرفة ماستر (عنابي)",
-    // Photo-accurate (bedroom_burgundy.jpg): side walls are warm rose/mauve pink,
-    // back wall (visible through door) is plain white. Using mauve for the
-    // accent sides, white for back/front.
-    color: "#C4A0A5",
-    wallColor: "#F5F5F5",
-    accentColor: "#C4A0A5",
-    accentWall: "left",
-    wallColors: {
-      top:    "#F5F5F5",
-      bottom: "#F5F5F5",
-      left:   "#C4A0A5",   // rose/mauve side wall
-      right:  "#C4A0A5",   // rose/mauve side wall
-    },
-    // Floor: same cream-marble tile as the rest of the apartment
-    // (the deep red carpet seen in the reference video is a temporary
-    // celebration covering, not a design choice).
-    floorColor: "#E8DCC8",
-    floorTexture: "tile-cream",
-    description: "غرفة نوم رئيسية بجدران وردية دافئة (موف) والباقي أبيض.",
-    plan: { x: 0, y: 570 },
-    width: 450,
-    depth: 350,
-    openings: [
-      { wall: "right", at: 120, size: 90,  kind: "door",   label: "باب" },
-      { wall: "left",  at: 160, size: 130, kind: "window", label: "شباك" }
-    ],
-    allowedCategories: ["bedroom", "common"]
-  },
+
+  // ── 7. KITCHEN (المطبخ) ───────────────────────────────────────────────────
+  // new/t_010: Dark wood kitchen door on the right wall of the corridor.
+  // new/t_011: Peek inside — dark wooden upper cabinets, small high window,
+  // cream tile floor. Walls: sky-blue paint (LOW confidence for the green dado).
+  // Kitchen door faces the salon's French door across the corridor.
   {
     id: "kitchen",
     name: "المطبخ",
-    // Photo-accurate (kitchen.jpg): light sky blue walls matching the hallway,
-    // with a green tile dado band on one wall.
     color: "#A8C4DE",
     wallColor: "#A8C4DE",
     accentColor: "#2E7D52",
     accentWall: "bottom",
     wallColors: {
       top:    "#A8C4DE",
-      bottom: "#2E7D52",   // green dado tile wall
+      bottom: "#2E7D52",   // green tile dado (unverified — plausible from prior analysis)
       left:   "#A8C4DE",
       right:  "#A8C4DE",
     },
-    // Floor: same cream-marble tile as the rest of the apartment
-    // (continuous from the corridor through the kitchen door).
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
-    description: "المطبخ — جدران سماوي فاتح وشريط بلاط أخضر.",
-    plan: { x: 970, y: 0 },
+    description: "المطبخ — جدران سماوي فاتح + شريط بلاط أخضر (غير مؤكد). خزائن خشب داكن. باب خشب داكن يواجه الباب الفرنسي للصالون عبر الممر.",
+    plan: { x: 670, y: 0 },
     width: 300,
     depth: 250,
     openings: [
-      { wall: "right", at: 80,  size: 85,  kind: "door",   label: "باب" },
-      { wall: "top",   at: 120, size: 100, kind: "window", label: "شباك" }
+      // Door faces the corridor (left wall when placed at x=670)
+      { wall: "left",  at: 80,  size: 85,  kind: "door",   label: "باب المطبخ (خشب داكن — يواجه الصالون)" },
+      { wall: "top",   at: 120, size: 100, kind: "window", label: "شباك صغير عالٍ" },
     ],
-    allowedCategories: ["kitchen", "common"]
+    allowedCategories: ["kitchen", "common"],
   },
+
+  // ── 8. MAIN BATHROOM (الحمام الرئيسي) ────────────────────────────────────
+  // old/t_065: Grey-blue mosaic floor tile (distinct from cream apartment tile).
+  // old/t_070: Cream/grey-beige wall tiles uniformly on all walls — NO green
+  // dado observed in any frame. The previous green accent is removed.
+  // Fixtures: wall-mounted sink, toilet, shower stub.
   {
     id: "bathroom_main",
     name: "الحمام الرئيسي",
-    // Photo-accurate (salon_blue.jpg / bathroom_main.jpg): white/cream tiled walls
-    // with a GREEN tile band on one wall around the bathtub.
-    color: "#2E7D52",
+    // color swatch = the neutral cream tile seen on all 4 walls
+    color: "#D8D0C4",
     wallColor: "#F0EDE8",
-    accentColor: "#2E7D52",
-    accentWall: "left",
     wallColors: {
-      top:    "#F0EDE8",
-      bottom: "#F0EDE8",
-      left:   "#2E7D52",   // green tile accent wall
+      top:    "#F0EDE8",   // cream/beige wall tile — uniform on all 4 walls
+      bottom: "#F0EDE8",   // (the green accent was NOT observed in any video frame)
+      left:   "#F0EDE8",
       right:  "#F0EDE8",
     },
-    floorColor: "#e8e8e8",
-    description: "حمام كامل بالبانيو — جدران بيضاء وبلاط أخضر مميز حول البانيو.",
-    plan: { x: 510, y: 360 },
+    // Floor: grey-blue mosaic tile (old/t_065) — distinct from apartment's cream tile.
+    floorColor: "#C8CBD0",
+    description: "حمام كامل — بلاط جداري كريم/رمادي بيج متجانس على 4 حوائط (لا يوجد بلاط أخضر في أي إطار من الفيديو)، بلاط أرضية رمادي أزرق فسيفساء، دش + مرحاض + حوض.",
+    plan: { x: 510, y: 410 },
     width: 250,
     depth: 200,
     openings: [
       { wall: "right", at: 60, size: 75, kind: "door",   label: "باب" },
-      { wall: "top",   at: 80, size: 60, kind: "window", label: "شباك" }
+      { wall: "top",   at: 80, size: 60, kind: "window", label: "شباك صغير" },
     ],
-    allowedCategories: ["bathroom", "common"]
+    allowedCategories: ["bathroom", "common"],
   },
+
+  // ── 9. SMALL WC (توالت صغير) ─────────────────────────────────────────────
+  // LOW CONFIDENCE — not separately identifiable in any video frame.
+  // Pale lavender/white walls retained from prior analysis.
   {
     id: "wc",
     name: "توالت صغير",
-    // Photo-accurate (wc_small.jpg): very pale lavender/white walls.
     color: "#D5D0DB",
     wallColor: "#E8E4F0",
     wallColors: {
@@ -247,13 +338,13 @@ const ROOMS = [
       right:  "#E8E4F0",
     },
     floorColor: "#e8e8e8",
-    description: "توالت خدمي صغير ببلاط أبيض مائل للافندر.",
-    plan: { x: 800, y: 360 },
+    description: "توالت خدمي صغير — بلاط أبيض مائل للافندر (ثقة منخفضة، لا إطار مستقل من الفيديو).",
+    plan: { x: 510, y: 620 },
     width: 150,
     depth: 150,
     openings: [
-      { wall: "right", at: 30, size: 70, kind: "door", label: "باب" }
+      { wall: "right", at: 30, size: 70, kind: "door", label: "باب" },
     ],
-    allowedCategories: ["bathroom"]
-  }
+    allowedCategories: ["bathroom"],
+  },
 ];

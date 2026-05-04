@@ -1229,24 +1229,35 @@ function buildCeiling(scene, room, useStandard, offX, offZ) {
   }
 
   // Ornate ceiling rose / medallion (a round plaster rosette) at the center of
-  // the tray drop. Used in formal rooms (e.g. living room in the new video).
-  if (cfg.rose && cfg.tray) {
+  // the ceiling. Works in both tray-ceiling rooms (living room) and flat-ceiling
+  // rooms (bedroom_blue). When a tray exists the rose sits on the tray bottom;
+  // otherwise it sits on the main ceiling (H).
+  if (cfg.rose) {
+    // Rose radius: 22% of the smaller room dimension (capped to a sensible range)
+    const roseSpanW = cfg.tray ? trayW : (Math.max(...verts.map(v => v.x)) - Math.min(...verts.map(v => v.x)));
+    const roseSpanD = cfg.tray ? trayD : (Math.max(...verts.map(v => v.y)) - Math.min(...verts.map(v => v.y)));
+    const roseR = Math.max(20, Math.min(80, Math.min(roseSpanW, roseSpanD) * 0.18));
+    // Position: centred on the tray (if any) or on the full room footprint
+    const roseCX = ox + (tx0 + tx1) / 2;
+    const roseCZ = oz + (ty0 + ty1) / 2;
+    // Y: tray bottom when tray exists; just below main ceiling otherwise
+    const roseY = cfg.tray ? trayY - 0.6 : H - 0.6;
+    const hookY  = cfg.tray ? trayY - 4   : H - 4;
     const roseTex = getCeilingRoseTexture();
-    const roseR = Math.min(trayW, trayD) * 0.22; // 22% of the smaller tray side
     const roseGeom = new THREE.CircleGeometry(roseR, 64);
     const roseMat = useStandard
       ? new THREE.MeshStandardMaterial({ map: roseTex, roughness: 0.7, transparent: true, side: THREE.DoubleSide })
       : new THREE.MeshBasicMaterial({ map: roseTex, transparent: true, side: THREE.DoubleSide });
     const roseMesh = new THREE.Mesh(roseGeom, roseMat);
     roseMesh.rotation.x = Math.PI / 2;
-    roseMesh.position.set(ox + (tx0 + tx1) / 2, trayY - 0.6, oz + (ty0 + ty1) / 2);
+    roseMesh.position.set(roseCX, roseY, roseCZ);
     group.add(roseMesh);
 
-    // A small chandelier hook (visible black point at the rose center).
+    // A small chandelier hook (visible dark sphere at the rose center).
     const hookGeom = new THREE.SphereGeometry(2.5, 12, 8);
     const hookMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
     const hookMesh = new THREE.Mesh(hookGeom, hookMat);
-    hookMesh.position.set(ox + (tx0 + tx1) / 2, trayY - 4, oz + (ty0 + ty1) / 2);
+    hookMesh.position.set(roseCX, hookY, roseCZ);
     group.add(hookMesh);
   }
 
@@ -1688,7 +1699,15 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
       : (room.accentColor && room.accentWall === w.wall
           ? room.accentColor
           : (room.wallColor || "#eeeeee"));
-    const colorInt = lighter(hexToInt(wallHex), w.wall === (room.accentWall || "__none__") && room.accentColor ? 0.0 : 0.15);
+    // Lighten non-accent walls slightly for the walkthrough (PBR material with
+    // MeshStandard needs a tiny lift so the dark sides don't look muddy).
+    // Accent walls keep their exact hex to preserve colour intent (fix: the
+    // previous 0.15 lift was applied unconditionally, washing out the vivid
+    // denim / cerulean / teal accent colours).
+    const isAccent = room.wallColors
+      ? false   // wallColors already encodes the exact per-wall intent; no lift needed
+      : (room.accentColor && room.accentWall === w.wall);
+    const colorInt = lighter(hexToInt(wallHex), isAccent ? 0.0 : 0.08);
     const mat = new THREE.MeshStandardMaterial({ color: colorInt, roughness: 0.9, side: THREE.DoubleSide });
 
     const shape = new THREE.Shape();
