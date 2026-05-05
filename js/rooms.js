@@ -121,8 +121,9 @@ const ROOMS = [
       { wall: "top",    at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (3 بانوهات — يقابل باب المطبخ)" },
       // Wide passage opening to the living room (south/bottom wall)
       { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة على المعيشة" },
-      // Balcony casement window — west (left) wall, white-framed with louvered glass
-      { wall: "left",   at: 150, size: 180, kind: "window", label: "شباك البلكونة (أبيض — زجاج بلوزي)" },
+      // Balcony casement window — west (left) wall, white-framed with louvered glass.
+      // Centred on the 400 cm wall: (400 - 120) / 2 = 140 cm from corner.
+      { wall: "left",   at: 140, size: 120, kind: "window", label: "شباك البلكونة (أبيض — زجاج بلوزي)" },
     ],
     allowedCategories: ["living", "common"],
   },

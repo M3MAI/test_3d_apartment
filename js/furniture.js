@@ -34,7 +34,7 @@ const FURNITURE_GROUPS = [
       { id: "dresser",    name: "تسريحة",          icon: "💄", w: 120, h: 45,  color: "#a8844a" },
       { id: "desk",       name: "مكتب دراسة",      icon: "✏️", w: 120, h: 60,  color: "#8a6a4a" },
       { id: "chair",      name: "كرسي",            icon: "🪑", w: 45,  h: 45,  color: "#7a5a3a" },
-      { id: "tv",         name: "شاشة تلفزيون",    icon: "📺", w: 110, h: 12,  color: "#222" }
+      { id: "tv_bedroom",  name: "شاشة تلفزيون",    icon: "📺", w: 110, h: 12,  color: "#222" }
     ]
   },
   {
@@ -47,8 +47,8 @@ const FURNITURE_GROUPS = [
       { id: "counter",    name: "رخامة مطبخ",      icon: "🧱", w: 120, h: 60,  color: "#c8b898" },
       { id: "cabinet",    name: "وحدة علوية",      icon: "🗄️", w: 100, h: 30,  color: "#8a6a4a" },
       { id: "microwave",  name: "ميكروويف",        icon: "🍲", w: 55,  h: 40,  color: "#444" },
-      { id: "dine_tbl",   name: "طاولة طعام",      icon: "🍽️", w: 100, h: 70,  color: "#a8844a" },
-      { id: "dine_chair", name: "كرسي طعام",       icon: "🪑", w: 45,  h: 45,  color: "#7a5a3a" }
+      { id: "kitchen_tbl",   name: "طاولة طعام",   icon: "🍽️", w: 100, h: 70,  color: "#a8844a" },
+      { id: "kitchen_chair", name: "كرسي طعام",    icon: "🪑", w: 45,  h: 45,  color: "#7a5a3a" }
     ]
   },
   {

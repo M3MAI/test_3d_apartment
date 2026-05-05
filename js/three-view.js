@@ -1,4 +1,4 @@
-// 3D preview & editor (Three.js). Builds a scene from the current room +
+﻿// 3D preview & editor (Three.js). Builds a scene from the current room +
 // placed furniture and exposes an editing API so app.js can drop/move/rotate
 // items directly in the 3D scene.
 //
@@ -922,6 +922,35 @@ function _addOpeningHole(holes, op, lo, hi, H) {
   holes.push(hole);
 }
 
+// Renders a white plaster arch-trim (surround molding) over an arched door opening.
+// Traces the same quadratic-bezier arch used by _addOpeningHole and wraps it in a
+// TubeGeometry — matching the white gypsum border in the real apartment (new/t_015).
+function _buildArchTrim(scene, op, lo, hi, wallMeshPos, wallAngle, useStandard) {
+  if (!op.arched) return;
+  const archRise  = Math.min(50, (hi - lo) / 4);
+  const archStart = Math.max(1, 210 - archRise);
+  const mid = (lo + hi) / 2;
+  const pts = [];
+  for (let y = 0; y <= archStart; y += 12) pts.push(new THREE.Vector3(lo, y, 0));
+  for (let i = 0; i <= 16; i++) {
+    const t2 = i / 16;
+    const bx = (1-t2)*(1-t2)*lo + 2*(1-t2)*t2*mid + t2*t2*hi;
+    const by = (1-t2)*(1-t2)*archStart + 2*(1-t2)*t2*(archStart+2*archRise) + t2*t2*archStart;
+    pts.push(new THREE.Vector3(bx, by, 0));
+  }
+  for (let y = archStart; y >= 0; y -= 12) pts.push(new THREE.Vector3(hi, y, 0));
+  const curve    = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.05);
+  const tubeGeom = new THREE.TubeGeometry(curve, pts.length * 3, 4, 4, false);
+  const mat = useStandard
+    ? new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.85 })
+    : new THREE.MeshBasicMaterial({ color: 0xfafafa });
+  const trimMesh = new THREE.Mesh(tubeGeom, mat);
+  trimMesh.position.copy(wallMeshPos);
+  trimMesh.rotation.y = wallAngle;
+  trimMesh.userData.ceilingPart = true;
+  scene.add(trimMesh);
+}
+
 // Builds a Shape from polygon vertices (in cm).
 function shapeFromVertices(verts) {
   const shape = new THREE.Shape();
@@ -995,6 +1024,10 @@ function buildWalls(scene, room) {
     mesh.receiveShadow = true;
     mesh.userData.wallId = w.wall;
     scene.add(mesh);
+    // Arch-trim molding for arched openings (white plaster surround).
+    (room.openings || []).filter(o => o.wall === w.wall && o.arched).forEach(o => {
+      _buildArchTrim(scene, o, o.at, o.at + o.size, mesh.position.clone(), mesh.rotation.y, /*useStandard*/ false);
+    });
   });
   // Crown molding (only when ceiling is configured for this room)
   if (room.ceiling) buildCrownMolding(scene, room, /*useStandard*/ false, 0, 0);
@@ -1061,6 +1094,11 @@ function buildWallsFromVertices(scene, room, useStandard, offX, offZ, collidable
     if (room.id) mesh.userData.roomId = room.id;
     scene.add(mesh);
     if (collidables) collidables.push(mesh);
+    // Arch-trim molding for arched openings on this polygon edge.
+    (opMap.get(e.idx) || []).filter(op => op.arched).forEach(op => {
+      const r2 = openingToLocalEdgeRange(op, e); if (!r2) return;
+      _buildArchTrim(scene, op, r2[0], r2[1], mesh.position.clone(), mesh.rotation.y, useStandard);
+    });
   });
 
   if (room.ceiling) buildCrownMolding(scene, room, useStandard, ox, oz);
@@ -1737,6 +1775,11 @@ function buildRoomAt(scene, room, offX, offZ, collidables) {
     mesh.userData.roomId = room.id;
     scene.add(mesh);
     if (collidables) collidables.push(mesh);
+    // Arch-trim molding for arched openings in apartment walkthrough.
+    (room.openings || []).filter(o => o.wall === w.wall && o.arched).forEach(o => {
+      const tPos = mesh.position.clone();
+      _buildArchTrim(scene, o, o.at, o.at + o.size, tPos, mesh.rotation.y, true);
+    });
   });
 
   // Crown molding (rectangular path) — only when ceiling is configured.

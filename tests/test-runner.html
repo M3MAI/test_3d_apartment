@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apartment Designer — Test Runner</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; max-width: 900px; margin: auto; }
+    h1 { color: #60a5fa; margin-bottom: 4px; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
+    .suite { margin-bottom: 20px; }
+    .suite-name { color: #a78bfa; font-size: 15px; font-weight: bold; margin-bottom: 6px; }
+    .test { padding: 4px 8px; margin: 2px 0; border-radius: 4px; font-size: 13px; }
+    .pass { background: #1a3a1a; color: #4ade80; }
+    .fail { background: #3a1a1a; color: #f87171; }
+    .warn { background: #3a2a10; color: #fbbf24; }
+    .summary { margin-top: 24px; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: bold; }
+    .summary.ok { background: #1a3a1a; color: #4ade80; }
+    .summary.bad { background: #3a1a1a; color: #f87171; }
+    #run-btn { margin: 12px 0; padding: 8px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    #run-btn:hover { background: #3b82f6; }
+    pre { font-size: 11px; color: #f87171; margin: 2px 0 0 12px; }
+  </style>
+</head>
+<body>
+  <h1>🏠 Apartment Designer — Test Suite</h1>
+  <p class="subtitle">Lightweight, dependency-free browser test runner (Audit C-08)</p>
+  <button id="run-btn" onclick="runAll()">▶ Run All Tests</button>
+  <div id="output"></div>
+
+  <!-- Load app modules in order (same as index.html, minus Three.js UI) -->
+  <script src="../js/rooms.js"></script>
+  <script src="../js/furniture.js"></script>
+
+  <script>
+  // ─── Tiny assertion library ────────────────────────────────────────────────
+  const results = [];
+  let currentSuite = null;
+
+  function suite(name) {
+    currentSuite = { name, tests: [] };
+    results.push(currentSuite);
+  }
+
+  function test(desc, fn) {
+    try {
+      fn();
+      currentSuite.tests.push({ desc, status: "pass" });
+    } catch (e) {
+      currentSuite.tests.push({ desc, status: "fail", err: e.message });
+    }
+  }
+
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || "Assertion failed");
+  }
+  function assertEqual(a, b, msg) {
+    if (a !== b) throw new Error(msg || `Expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+  }
+  function assertRange(val, lo, hi, msg) {
+    if (val < lo || val > hi) throw new Error(msg || `${val} not in [${lo}, ${hi}]`);
+  }
+  function assertContains(arr, item, msg) {
+    if (!arr.includes(item)) throw new Error(msg || `Array does not contain ${JSON.stringify(item)}`);
+  }
+
+  // ─── Test Suites ──────────────────────────────────────────────────────────
+
+  function defineTests() {
+
+    // ── Suite 1: ROOMS data integrity ──────────────────────────────────────
+    suite("rooms.js — data integrity");
+
+    test("ROOMS is a non-empty array", () => {
+      assert(Array.isArray(ROOMS) && ROOMS.length > 0, "ROOMS must be a non-empty array");
+    });
+
+    test("Every room has required fields: id, name, width, depth, plan", () => {
+      ROOMS.forEach(r => {
+        assert(typeof r.id === "string" && r.id.length > 0, `Room missing id: ${JSON.stringify(r)}`);
+        assert(typeof r.name === "string" && r.name.length > 0, `Room ${r.id} missing name`);
+        assert(typeof r.width === "number" && r.width > 0, `Room ${r.id} invalid width: ${r.width}`);
+        assert(typeof r.depth === "number" && r.depth > 0, `Room ${r.id} invalid depth: ${r.depth}`);
+        assert(r.plan && typeof r.plan.x === "number" && typeof r.plan.y === "number",
+          `Room ${r.id} missing or invalid plan coords`);
+      });
+    });
+
+    test("All room IDs are unique", () => {
+      const ids = ROOMS.map(r => r.id);
+      const unique = new Set(ids);
+      assertEqual(unique.size, ids.length, `Duplicate IDs found: ${ids.filter((id,i) => ids.indexOf(id) !== i)}`);
+    });
+
+    test("Room dimensions are within realistic apartment range (100–1500 cm)", () => {
+      ROOMS.forEach(r => {
+        assertRange(r.width, 100, 1500, `Room ${r.id} width ${r.width} out of range`);
+        assertRange(r.depth, 100, 1500, `Room ${r.id} depth ${r.depth} out of range`);
+      });
+    });
+
+    test("All wall colors (wallColor) are valid hex strings", () => {
+      const hexRe = /^#[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/;
+      ROOMS.forEach(r => {
+        if (r.wallColor) assert(hexRe.test(r.wallColor), `Room ${r.id} wallColor '${r.wallColor}' invalid`);
+        if (r.accentColor) assert(hexRe.test(r.accentColor), `Room ${r.id} accentColor '${r.accentColor}' invalid`);
+        if (r.wallColors) {
+          ["top","bottom","left","right"].forEach(w => {
+            if (r.wallColors[w]) assert(hexRe.test(r.wallColors[w]),
+              `Room ${r.id} wallColors.${w} '${r.wallColors[w]}' invalid`);
+          });
+        }
+      });
+    });
+
+    test("All openings have valid wall/at/size/kind", () => {
+      const validWalls = ["top","bottom","left","right"];
+      const validKinds = ["door","window"];
+      ROOMS.forEach(r => {
+        (r.openings || []).forEach((op, i) => {
+          assertContains(validWalls, op.wall, `Room ${r.id} opening[${i}] invalid wall: ${op.wall}`);
+          assertContains(validKinds, op.kind, `Room ${r.id} opening[${i}] invalid kind: ${op.kind}`);
+          assertRange(op.at, 0, 2000, `Room ${r.id} opening[${i}] 'at' out of range: ${op.at}`);
+          assertRange(op.size, 20, 500, `Room ${r.id} opening[${i}] 'size' out of range: ${op.size}`);
+        });
+      });
+    });
+
+    test("Opening at+size does not exceed wall length", () => {
+      ROOMS.forEach(r => {
+        (r.openings || []).forEach((op, i) => {
+          const wallLen = (op.wall === "top" || op.wall === "bottom") ? r.width : r.depth;
+          assert(op.at + op.size <= wallLen + 5, // +5 cm tolerance for rounding
+            `Room ${r.id} opening[${i}] extends beyond wall: at=${op.at} size=${op.size} wallLen=${wallLen}`);
+        });
+      });
+    });
+
+    test("Corridor room exists", () => {
+      const c = ROOMS.find(r => r.id === "corridor");
+      assert(c, "Corridor room must exist");
+    });
+
+    test("Living room has arched opening (arched: true)", () => {
+      const living = ROOMS.find(r => r.id === "living");
+      assert(living, "Living room must exist");
+      const arch = (living.openings || []).find(op => op.arched === true);
+      assert(arch, "Living room must have at least one arched opening");
+    });
+
+    test("bedroom_blue has ceiling.rose: true", () => {
+      const bb = ROOMS.find(r => r.id === "bedroom_blue");
+      assert(bb, "bedroom_blue must exist");
+      assert(bb.ceiling && bb.ceiling.rose === true, "bedroom_blue must have ceiling.rose: true");
+    });
+
+    test("Rooms with tray ceiling also have cove settings", () => {
+      ROOMS.forEach(r => {
+        if (r.ceiling && r.ceiling.tray) {
+          assert(typeof r.ceiling.coveColor === "string" || r.ceiling.cove !== undefined,
+            `Room ${r.id} has tray but no cove color`);
+        }
+      });
+    });
+
+    test("Rooms with tile-cream floor also have floorColor set", () => {
+      ROOMS.forEach(r => {
+        if (r.floorTexture === "tile-cream") {
+          assert(r.floorColor, `Room ${r.id} has tile-cream texture but no floorColor fallback`);
+        }
+      });
+    });
+
+    // ── Suite 2: resolveWallColor ──────────────────────────────────────────
+    suite("resolveWallColor — priority chain");
+
+    test("wallColors > accentColor for the same wall", () => {
+      const room = {
+        wallColor: "#aaaaaa",
+        accentColor: "#ff0000",
+        accentWall: "top",
+        wallColors: { top: "#00ff00" },
+      };
+      assertEqual(resolveWallColor(room, "top"), "#00ff00",
+        "wallColors.top should override accentColor");
+    });
+
+    test("accentColor used when accentWall matches and no wallColors", () => {
+      const room = {
+        wallColor: "#aaaaaa",
+        accentColor: "#ff0000",
+        accentWall: "left",
+      };
+      assertEqual(resolveWallColor(room, "left"), "#ff0000");
+    });
+
+    test("Falls back to wallColor when no other match", () => {
+      const room = { wallColor: "#cccccc" };
+      assertEqual(resolveWallColor(room, "right"), "#cccccc");
+    });
+
+    test("Falls back to #eeeeee when room has no wallColor at all", () => {
+      assertEqual(resolveWallColor({}, "top"), "#eeeeee");
+    });
+
+    // ── Suite 3: Furniture catalog integrity ────────────────────────────────
+    suite("furniture.js — catalog integrity");
+
+    test("FURNITURE_GROUPS is a non-empty array", () => {
+      assert(typeof FURNITURE_GROUPS !== "undefined", "FURNITURE_GROUPS must be defined");
+      assert(Array.isArray(FURNITURE_GROUPS) && FURNITURE_GROUPS.length > 0,
+        "FURNITURE_GROUPS must be a non-empty array");
+    });
+
+    test("Every group has id, label, items array", () => {
+      FURNITURE_GROUPS.forEach(g => {
+        assert(typeof g.id === "string" && g.id.length > 0, `Group missing id: ${JSON.stringify(g)}`);
+        assert(typeof g.label === "string", `Group ${g.id} missing label`);
+        assert(Array.isArray(g.items), `Group ${g.id} items must be an array`);
+      });
+    });
+
+    test("All furniture items have id, name, w, h > 0", () => {
+      FURNITURE_GROUPS.forEach(g => {
+        g.items.forEach(item => {
+          assert(typeof item.id === "string" && item.id.length > 0,
+            `Item in group ${g.id} missing id`);
+          assert(typeof item.name === "string" && item.name.length > 0,
+            `Item ${item.id} missing name`);
+          assert(typeof item.w === "number" && item.w > 0,
+            `Item ${item.id} invalid w: ${item.w}`);
+          assert(typeof item.h === "number" && item.h > 0,
+            `Item ${item.id} invalid h: ${item.h}`);
+        });
+      });
+    });
+
+    test("Furniture item IDs are globally unique", () => {
+      const ids = [];
+      FURNITURE_GROUPS.forEach(g => g.items.forEach(item => ids.push(item.id)));
+      const unique = new Set(ids);
+      const dups = ids.filter((id, i) => ids.indexOf(id) !== i);
+      assertEqual(unique.size, ids.length, `Duplicate furniture IDs: ${[...new Set(dups)].join(", ")}`);
+    });
+
+    test("Furniture dimensions are within realistic range (10–600 cm)", () => {
+      FURNITURE_GROUPS.forEach(g => {
+        g.items.forEach(item => {
+          assertRange(item.w, 10, 600, `Item ${item.id} w=${item.w} out of range`);
+          assertRange(item.h, 10, 600, `Item ${item.id} h=${item.h} out of range`);
+        });
+      });
+    });
+
+    // ── Suite 4: Plan layout sanity ────────────────────────────────────────
+    suite("rooms.js — plan layout spatial sanity");
+
+    test("No two rooms share the exact same plan origin", () => {
+      const origins = ROOMS.map(r => `${r.plan.x},${r.plan.y}`);
+      const unique = new Set(origins);
+      const dups = origins.filter((o, i) => origins.indexOf(o) !== i);
+      assertEqual(unique.size, origins.length,
+        `Rooms share plan origin: ${[...new Set(dups)].join(" | ")}`);
+    });
+
+    test("All plan coordinates are non-negative", () => {
+      ROOMS.forEach(r => {
+        assert(r.plan.x >= 0, `Room ${r.id} plan.x is negative: ${r.plan.x}`);
+        assert(r.plan.y >= 0, `Room ${r.id} plan.y is negative: ${r.plan.y}`);
+      });
+    });
+
+    test("Apartment total footprint is within 700–1500 cm per axis", () => {
+      const maxX = Math.max(...ROOMS.map(r => r.plan.x + r.width));
+      const maxY = Math.max(...ROOMS.map(r => r.plan.y + r.depth));
+      assertRange(maxX, 700, 1500, `Total apartment X span ${maxX} cm seems wrong`);
+      assertRange(maxY, 700, 1500, `Total apartment Y span ${maxY} cm seems wrong`);
+    });
+
+  } // end defineTests()
+
+  // ─── Runner ───────────────────────────────────────────────────────────────
+  function runAll() {
+    results.length = 0;
+    defineTests();
+
+    let totalPass = 0, totalFail = 0;
+    const out = document.getElementById("output");
+    out.innerHTML = "";
+
+    results.forEach(suite => {
+      const div = document.createElement("div");
+      div.className = "suite";
+      div.innerHTML = `<div class="suite-name">📦 ${suite.name}</div>`;
+      suite.tests.forEach(t => {
+        const d = document.createElement("div");
+        d.className = `test ${t.status}`;
+        d.textContent = `${t.status === "pass" ? "✓" : "✗"} ${t.desc}`;
+        if (t.err) {
+          const pre = document.createElement("pre");
+          pre.textContent = t.err;
+          d.appendChild(pre);
+        }
+        div.appendChild(d);
+        if (t.status === "pass") totalPass++; else totalFail++;
+      });
+      out.appendChild(div);
+    });
+
+    const sum = document.createElement("div");
+    sum.className = `summary ${totalFail === 0 ? "ok" : "bad"}`;
+    sum.textContent = totalFail === 0
+      ? `✅ All ${totalPass} tests passed`
+      : `❌ ${totalFail} failed, ${totalPass} passed (${totalPass + totalFail} total)`;
+    out.appendChild(sum);
+  }
+  </script>
+</body>
+</html>
