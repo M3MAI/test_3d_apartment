@@ -1539,6 +1539,7 @@ function drawWalkthrough(container) {
     rooms: ROOMS,
     itemsByRoom: gatherAllItems(),
     findItem,
+    startRoomId: state.activeRoom || null,   // spawn in the currently selected room
   });
 }
 

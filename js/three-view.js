@@ -1,4 +1,4 @@
-﻿// 3D preview & editor (Three.js). Builds a scene from the current room +
+// 3D preview & editor (Three.js). Builds a scene from the current room +
 // placed furniture and exposes an editing API so app.js can drop/move/rotate
 // items directly in the 3D scene.
 //
@@ -1478,7 +1478,7 @@ function aptBounds(rooms) {
   return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
 }
 
-function showApartment(container, { rooms, itemsByRoom, findItem }) {
+function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId }) {
   hideApartment();
   const bounds = aptBounds(rooms);
 
@@ -1535,11 +1535,16 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
     buildRoomAt(scene, room, ox, oz, collidables);
   });
 
-  // Start at the apartment entrance (first room's door-facing side)
-  const startX = bounds.w / 2;
-  const startZ = bounds.h - 30;
+  // Camera start: spawn inside the currently selected room, or corridor entrance.
+  let startX = bounds.w / 2;
+  let startZ = 30; // default: near the corridor entrance (top of plan)
+  const startRoom = startRoomId && rooms.find(r => r.id === startRoomId);
+  if (startRoom) {
+    startX = ((startRoom.plan && startRoom.plan.x) || 0) - bounds.minX + startRoom.width / 2;
+    startZ = ((startRoom.plan && startRoom.plan.y) || 0) - bounds.minY + startRoom.depth / 2;
+  }
   camera.position.set(startX, 160, startZ);
-  camera.lookAt(bounds.w / 2, 160, bounds.h / 2);
+  camera.lookAt(startX, 160, startZ - 1);
 
   const controls = new PointerLockControls(camera, renderer.domElement);
   scene.add(controls.getObject());
@@ -1547,9 +1552,29 @@ function showApartment(container, { rooms, itemsByRoom, findItem }) {
   // Click-to-lock prompt
   const prompt = document.createElement("div");
   prompt.className = "walk-prompt";
-  prompt.innerHTML = "<div class='walk-prompt-inner'><h3>انقر لبدء الجولة</h3><p>W/A/S/D للتحرك • الفأرة للنظر • Shift للجري • Space للقفز • Esc للخروج</p></div>";
+  // Build room-picker buttons so the user can choose where to start.
+  const roomBtns = rooms.map(r => {
+    const ox = ((r.plan && r.plan.x) || 0) - bounds.minX + r.width / 2;
+    const oz = ((r.plan && r.plan.y) || 0) - bounds.minY + r.depth / 2;
+    return `<button class="walk-room-btn" data-sx="${ox}" data-sz="${oz}" data-name="${r.name}" style="background:${r.color || '#6892B0'}">${r.name}</button>`;
+  }).join("");
+  prompt.innerHTML = `<div class="walk-prompt-inner">
+    <h3>اختر نقطة الانطلاق</h3>
+    <p>W/A/S/D للتحرك • الفأرة للنظر • Shift للجري • Space للقفز • Esc للخروج</p>
+    <div class="walk-room-grid">${roomBtns}</div>
+  </div>`;
   container.appendChild(prompt);
-  const onPromptClick = () => controls.lock();
+  // Room-button click → teleport camera to that room, then lock.
+  const onPromptClick = (e) => {
+    const btn = e.target.closest(".walk-room-btn");
+    if (btn) {
+      const sx = parseFloat(btn.dataset.sx);
+      const sz = parseFloat(btn.dataset.sz);
+      camera.position.set(sx, 160, sz);
+      camera.lookAt(sx, 160, sz - 1); // face forward
+    }
+    controls.lock();
+  };
   prompt.addEventListener("click", onPromptClick);
   controls.addEventListener("lock", () => { prompt.style.display = "none"; });
   controls.addEventListener("unlock", () => { prompt.style.display = "flex"; });
