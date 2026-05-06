@@ -103,10 +103,10 @@ const ROOMS = [
     color: "#BFD6D8",
     wallColor: "#BFD6D8",
     wallColors: {
-      top:    "#6892B0",   // denim-blue accent — holds the French door (faces corridor)
-      bottom: "#BFD6D8",   // mint
+      top:    "#BFD6D8",   // mint (exterior north wall)
+      bottom: "#BFD6D8",   // mint (passage to living)
       left:   "#BFD6D8",   // mint (balcony / window side)
-      right:  "#BFD6D8",   // mint
+      right:  "#6892B0",   // denim-blue accent — holds the French door (faces corridor)
     },
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
@@ -116,12 +116,12 @@ const ROOMS = [
     width: 500,
     depth: 400,
     openings: [
-      // French door on the denim accent wall (top) — the salon's main entrance from the corridor.
-      // Width ~180 cm; position 160 cm from the west edge of the top wall.
-      { wall: "top",    at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (3 بانوهات — يقابل باب المطبخ)" },
+      // French door on the denim accent wall (right) — faces the corridor.
+      // Corridor left@160 aligns with salon right@160.
+      { wall: "right",  at: 160, size: 180, kind: "door",   label: "الباب الفرنسي (3 بانوهات — يقابل باب المطبخ)" },
       // Wide passage opening to the living room (south/bottom wall)
       { wall: "bottom", at: 50,  size: 200, kind: "door",   label: "فتحة على المعيشة" },
-      // Balcony casement window — west (left) wall, white-framed with louvered glass.
+      // Balcony casement window — west (left) wall, exterior.
       // Centred on the 400 cm wall: (400 - 120) / 2 = 140 cm from corner.
       { wall: "left",   at: 140, size: 120, kind: "window", label: "شباك البلكونة (أبيض — زجاج بلوزي)" },
     ],
@@ -194,7 +194,9 @@ const ROOMS = [
     width: 450,
     depth: 350,
     openings: [
-      { wall: "right", at: 120, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      // Door on top wall → faces corridor end (corridor bottom at y=760, master top at y=770)
+      { wall: "top",   at: 180, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      // Window on left wall → exterior west (balcony side)
       { wall: "left",  at: 160, size: 130, kind: "window", label: "شباك أبيض بمغازل" },
     ],
     allowedCategories: ["bedroom", "common"],
@@ -212,12 +214,12 @@ const ROOMS = [
     color: "#2C7DA0",
     wallColor: "#F5F5F5",
     accentColor: "#2C7DA0",
-    accentWall: "top",
+    accentWall: "right",
     wallColors: {
-      top:    "#2C7DA0",   // deep cerulean — more saturated than salon denim
+      top:    "#F5F5F5",
       bottom: "#F5F5F5",
       left:   "#F5F5F5",
-      right:  "#F5F5F5",
+      right:  "#2C7DA0",   // deep cerulean accent — holds the window (exterior east wall)
     },
     floorColor: "#E8DCC8",
     floorTexture: "tile-cream",
@@ -228,8 +230,10 @@ const ROOMS = [
     width: 400,
     depth: 350,
     openings: [
-      { wall: "right", at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
-      { wall: "top",   at: 150, size: 130, kind: "window", label: "شباك (مغزلي أبيض) على الحائط البترولي" },
+      // Door on left wall → faces corridor (corridor right at x=660, bedroom left at x=670)
+      { wall: "left",  at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      // Window on right wall → exterior east (outside)
+      { wall: "right", at: 150, size: 130, kind: "window", label: "شباك (مغزلي أبيض)" },
     ],
     allowedCategories: ["bedroom", "common"],
   },
@@ -256,7 +260,9 @@ const ROOMS = [
     width: 350,
     depth: 300,
     openings: [
-      { wall: "right",  at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      // Door on left wall → faces corridor
+      { wall: "left",   at: 100, size: 90,  kind: "door",   label: "باب خشب داكن" },
+      // Window on bottom wall → exterior south (outside)
       { wall: "bottom", at: 130, size: 120, kind: "window", label: "شباك" },
     ],
     allowedCategories: ["bedroom", "common"],
@@ -318,8 +324,10 @@ const ROOMS = [
     width: 250,
     depth: 200,
     openings: [
-      { wall: "right", at: 60, size: 75, kind: "door",   label: "باب" },
-      { wall: "top",   at: 80, size: 60, kind: "window", label: "شباك صغير" },
+      // Door on left wall → faces corridor
+      { wall: "left",  at: 60, size: 75, kind: "door",   label: "باب" },
+      // Window on right wall → exterior / ventilation
+      { wall: "right", at: 80, size: 60, kind: "window", label: "شباك صغير" },
     ],
     allowedCategories: ["bathroom", "common"],
   },
@@ -344,7 +352,8 @@ const ROOMS = [
     width: 150,
     depth: 150,
     openings: [
-      { wall: "right", at: 30, size: 70, kind: "door", label: "باب" },
+      // Door on left wall → faces corridor
+      { wall: "left", at: 30, size: 70, kind: "door", label: "باب" },
     ],
     allowedCategories: ["bathroom"],
   },
