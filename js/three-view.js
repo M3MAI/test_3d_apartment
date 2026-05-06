@@ -1,4 +1,4 @@
-// 3D preview & editor (Three.js). Builds a scene from the current room +
+﻿// 3D preview & editor (Three.js). Builds a scene from the current room +
 // placed furniture and exposes an editing API so app.js can drop/move/rotate
 // items directly in the 3D scene.
 //
@@ -29,6 +29,7 @@ function wallH(room) {
 
 let ctx = null;                // per-show rendering context  (room-level 3D)
 let aptCtx = null;             // per-show apartment walkthrough context
+const _collRay = new THREE.Raycaster(); // reusable raycaster for wall collision (#1)
 
 // ---------- Disposal ----------
 function disposeObj(obj) {
@@ -1512,7 +1513,7 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   scene.add(sun);
 
   // Unified floor spanning whole apartment (light neutral)
-  const floorMat = new THREE.MeshBasicMaterial({ color: 0xd8ccb8 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xd8ccb8, roughness: 0.6, metalness: 0.02 }); // PBR floor (#5)
   const floorGeo = new THREE.PlaneGeometry(bounds.w + 200, bounds.h + 200);
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
@@ -1577,8 +1578,87 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   };
   prompt.addEventListener("click", onPromptClick);
   controls.addEventListener("lock", () => { prompt.style.display = "none"; });
-  controls.addEventListener("unlock", () => { prompt.style.display = "flex"; });
+  controls.addEventListener("unlock", () => {
+    prompt.style.display = "flex";
+    // Highlight the room the player is currently in (Enhancement #8)
+    const p = camera.position;
+    prompt.querySelectorAll(".walk-room-btn").forEach(btn => {
+      btn.classList.remove("walk-room-active");
+      const sx = parseFloat(btn.dataset.sx);
+      const sz = parseFloat(btn.dataset.sz);
+      // Find the room by checking if camera is within its bounds
+      const match = rooms.find(r => {
+        const rx = ((r.plan && r.plan.x) || 0) - bounds.minX;
+        const rz = ((r.plan && r.plan.y) || 0) - bounds.minY;
+        return p.x >= rx && p.x <= rx + r.width && p.z >= rz && p.z <= rz + r.depth;
+      });
+      if (match) {
+        const mx = ((match.plan && match.plan.x) || 0) - bounds.minX + match.width / 2;
+        const mz = ((match.plan && match.plan.y) || 0) - bounds.minY + match.depth / 2;
+        if (Math.abs(sx - mx) < 1 && Math.abs(sz - mz) < 1) btn.classList.add("walk-room-active");
+      }
+    });
+  });
+  // ── Minimap overlay (Enhancement #4) ──
+  const minimap = document.createElement("canvas");
+  minimap.className = "walk-minimap";
+  minimap.width = 160; minimap.height = 160;
+  container.appendChild(minimap);
+  const mmCtx2d = minimap.getContext("2d");
+  function drawMinimap() {
+    const cw = minimap.width, ch = minimap.height;
+    const scale = Math.min((cw - 10) / bounds.w, (ch - 10) / bounds.h);
+    const padX = (cw - bounds.w * scale) / 2;
+    const padY = (ch - bounds.h * scale) / 2;
+    mmCtx2d.clearRect(0, 0, cw, ch);
+    mmCtx2d.fillStyle = "rgba(0,0,0,0.55)";
+    mmCtx2d.fillRect(0, 0, cw, ch);
+    // Draw rooms
+    rooms.forEach(r => {
+      const rx = ((r.plan && r.plan.x) || 0) - bounds.minX;
+      const ry = ((r.plan && r.plan.y) || 0) - bounds.minY;
+      mmCtx2d.fillStyle = r.color || "#6892B0";
+      mmCtx2d.globalAlpha = 0.5;
+      mmCtx2d.fillRect(padX + rx * scale, padY + ry * scale, r.width * scale, r.depth * scale);
+      mmCtx2d.globalAlpha = 1;
+      mmCtx2d.strokeStyle = "#fff";
+      mmCtx2d.lineWidth = 0.5;
+      mmCtx2d.strokeRect(padX + rx * scale, padY + ry * scale, r.width * scale, r.depth * scale);
+    });
+    // Player dot + direction arrow
+    const p = camera.position;
+    const px = padX + p.x * scale;
+    const py = padY + p.z * scale;
+    mmCtx2d.fillStyle = "#ff4444";
+    mmCtx2d.beginPath();
+    mmCtx2d.arc(px, py, 4, 0, Math.PI * 2);
+    mmCtx2d.fill();
+    // Direction arrow from camera facing
+    const dir3 = new THREE.Vector3(0, 0, -1);
+    dir3.applyQuaternion(camera.quaternion);
+    const arrowLen = 14;
+    mmCtx2d.strokeStyle = "#ff4444";
+    mmCtx2d.lineWidth = 2;
+    mmCtx2d.beginPath();
+    mmCtx2d.moveTo(px, py);
+    mmCtx2d.lineTo(px + dir3.x * arrowLen, py + dir3.z * arrowLen);
+    mmCtx2d.stroke();
+  }
 
+
+  // ── Footstep audio (Enhancement #14) ──
+  let _audioCtx = null, _footstepEnabled = false, _stepTimer = 0;
+  function playFootstep() {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = 80 + Math.random() * 40;
+    gain.gain.setValueAtTime(0.08, _audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + 0.08);
+    osc.connect(gain).connect(_audioCtx.destination);
+    osc.start(); osc.stop(_audioCtx.currentTime + 0.08);
+  }
   // Movement state
   const move = { f: 0, b: 0, l: 0, r: 0, up: false };
   const velocity = new THREE.Vector3();

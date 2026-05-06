@@ -554,6 +554,31 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 .walk-room-btn:active { transform: scale(0.97); }
+/* Minimap overlay in walkthrough (Enhancement #4) */
+.walk-minimap {
+  position: absolute;
+  top: 12px; left: 12px;
+  width: 160px; height: 160px;
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.3);
+  z-index: 8;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+/* Room picker active highlight (Enhancement #8) */
+.walk-room-btn.walk-room-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.5), 0 4px 16px rgba(0,0,0,0.35);
+  transform: scale(1.06);
+}
+/* Smooth mode transitions (Enhancement #13) */
+.room-container > * {
+  animation: fadeInView 0.25s ease-out;
+}
+@keyframes fadeInView {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 @media (max-width: 480px) { .walk-room-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* ---------- Stage meta extras ---------- */
@@ -1303,3 +1328,16 @@ kbd {
   font-size: 11px !important;
 }
 
+
+/* Dimension tooltip on plan view hover (Enhancement #7) */
+.plan-dim-tip {
+  position: absolute;
+  top: 8px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.8); color: #fff;
+  padding: 4px 14px; border-radius: 20px;
+  font-size: 13px; font-weight: 600;
+  z-index: 5; pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.plan-dim-tip[hidden] { display: none; }

@@ -1433,6 +1433,7 @@ function drawOverview(container) {
 
   container.innerHTML = `
     <div class="room-svg-wrap plan-wrap">
+      <span id="plan-dim-tip" class="plan-dim-tip" hidden></span>
       <svg class="room-svg plan-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
         <g id="viewport" transform="${viewportTransform(vbW, vbH)}">
           <rect x="0" y="0" width="${vbW}" height="${vbH}" fill="var(--panel)" opacity="0.35" />
@@ -1452,6 +1453,25 @@ function drawOverview(container) {
       const id = g.getAttribute("data-plan-room");
       selectRoom(id);
       setViewMode("2d");
+    });
+    // Enhancement #9: double-click → jump straight to 3D
+    g.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      const id = g.getAttribute("data-plan-room");
+      selectRoom(id);
+      setViewMode("3d");
+    });
+    // Enhancement #7: show dimension tooltip on hover
+    g.addEventListener("mouseenter", () => {
+      const id = g.getAttribute("data-plan-room");
+      const r = ROOMS.find(rm => rm.id === id);
+      if (!r) return;
+      const tip = document.getElementById("plan-dim-tip");
+      if (tip) { tip.textContent = `${r.name}: ${fmtPair(r.width, r.depth)}`; tip.hidden = false; }
+    });
+    g.addEventListener("mouseleave", () => {
+      const tip = document.getElementById("plan-dim-tip");
+      if (tip) tip.hidden = true;
     });
   });
 }

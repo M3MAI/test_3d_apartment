@@ -277,6 +277,50 @@
       assertRange(maxY, 700, 1500, `Total apartment Y span ${maxY} cm seems wrong`);
     });
 
+    // Enhancement #12: Verify doors face interior walls (shared with another room)
+    test("Doors are on walls shared with another room (not exterior)", () => {
+      const corridor = ROOMS.find(r => r.id === "corridor");
+      const TOL = 5; // cm tolerance
+      ROOMS.forEach(r => {
+        if (r.id === "corridor") return; // corridor's door is the apartment entrance, skip
+        (r.openings || []).filter(o => o.kind === "door").forEach((op, i) => {
+          const wall = op.wall;
+          // Get the world-space edge of this wall
+          let edgeStart, edgeEnd, perpAxis;
+          const rx = r.plan.x, ry = r.plan.y;
+          if (wall === "top")    { edgeStart = rx; edgeEnd = rx + r.width; perpAxis = "y"; }
+          if (wall === "bottom") { edgeStart = rx; edgeEnd = rx + r.width; perpAxis = "y"; }
+          if (wall === "left")   { edgeStart = ry; edgeEnd = ry + r.depth; perpAxis = "x"; }
+          if (wall === "right")  { edgeStart = ry; edgeEnd = ry + r.depth; perpAxis = "x"; }
+          // Check if any other room touches this wall
+          const neighbour = ROOMS.find(other => {
+            if (other.id === r.id) return false;
+            const ox = other.plan.x, oy = other.plan.y;
+            if (perpAxis === "y") {
+              const wallY = wall === "top" ? ry : ry + r.depth;
+              const otherTopY = oy;
+              const otherBottomY = oy + other.depth;
+              if (Math.abs(wallY - otherTopY) < TOL || Math.abs(wallY - otherBottomY) < TOL) {
+                // Check X overlap
+                const oStart = ox, oEnd = ox + other.width;
+                return edgeEnd > oStart + TOL && edgeStart < oEnd - TOL;
+              }
+            } else {
+              const wallX = wall === "left" ? rx : rx + r.width;
+              const otherLeftX = ox;
+              const otherRightX = ox + other.width;
+              if (Math.abs(wallX - otherLeftX) < TOL || Math.abs(wallX - otherRightX) < TOL) {
+                const oStart = oy, oEnd = oy + other.depth;
+                return edgeEnd > oStart + TOL && edgeStart < oEnd - TOL;
+              }
+            }
+            return false;
+          });
+          assert(neighbour, `Room ${r.id} door[${i}] on '${wall}' wall has no adjacent room — may be on an exterior wall`);
+        });
+      });
+    });
+
   } // end defineTests()
 
   // ─── Runner ───────────────────────────────────────────────────────────────
