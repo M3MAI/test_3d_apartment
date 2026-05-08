@@ -107,11 +107,12 @@ function show(container, opts) {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
+  renderer.outputColorSpace = THREE.SRGBColorSpace; // correct color for GLB/PBR textures
   renderer.domElement.style.touchAction = "none"; // we drive gestures ourselves
   container.appendChild(renderer.domElement);
 
   // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
   const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(room.width * 0.6, WALL_HEIGHT * 2, room.depth * 0.4);
   key.castShadow = true;
@@ -1589,11 +1590,12 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
 
   // Lights
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambient);
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(bounds.w * 0.6, WALL_HEIGHT * 4, bounds.h * 0.4);
