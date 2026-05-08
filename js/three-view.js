@@ -1431,20 +1431,30 @@ function buildFurnitureMesh(inst, item) {
     const loader = new THREE.TextureLoader();
     const loadTex = (url) => { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; };
     const frontTex = loadTex(item.image);
-    const matOpts = { map: frontTex, roughness: 0.7, metalness: 0.0 };
-    if (hasAlpha) { matOpts.transparent = true; matOpts.alphaTest = 0.08; matOpts.side = THREE.DoubleSide; matOpts.depthWrite = true; }
-    const frontMat = new THREE.MeshStandardMaterial(matOpts);
+    // Use MeshBasicMaterial for photo faces — renders EXACT photo pixels
+    // regardless of scene lighting. MeshStandardMaterial tints/darkens photos.
+    const frontMatOpts = { map: frontTex };
+    if (hasAlpha) { frontMatOpts.transparent = true; frontMatOpts.alphaTest = 0.08; frontMatOpts.side = THREE.DoubleSide; }
+    const frontMat = new THREE.MeshBasicMaterial(frontMatOpts);
     if (isBillboard) {
       frontMat.side = THREE.DoubleSide;
       materials = frontMat;
     } else {
-      const sideMat = new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.85, transparent: hasAlpha, opacity: hasAlpha ? 0.85 : 1 });
-      const topMat = new THREE.MeshStandardMaterial({ color: lighter(sideColor, -0.15), roughness: 0.85 });
+      // Sides use the dominant color sampled from photo center
+      const sideMat = new THREE.MeshBasicMaterial({ color: sideColor, transparent: hasAlpha, opacity: hasAlpha ? 0.85 : 1 });
+      const topMat = new THREE.MeshBasicMaterial({ color: lighter(sideColor, -0.08) });
       let sideTexMat = sideMat;
-      if (item.imageSide) { const sideTex = loadTex(item.imageSide); sideTexMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.7, metalness: 0.0, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 }); }
+      if (item.imageSide) {
+        const sideTex = loadTex(item.imageSide);
+        sideTexMat = new THREE.MeshBasicMaterial({ map: sideTex, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 });
+      }
       let topTexMat = topMat;
-      if (item.imageTop) { const topTex = loadTex(item.imageTop); topTexMat = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.9 }); }
+      if (item.imageTop) {
+        const topTex = loadTex(item.imageTop);
+        topTexMat = new THREE.MeshBasicMaterial({ map: topTex });
+      }
       const backMat = frontMat.clone();
+      // [+x, -x, +y, -y, +z, -z] = right, left, top, bottom, front, back
       materials = [sideTexMat, sideTexMat.clone(), topTexMat, sideMat.clone(), frontMat, backMat];
     }
   } else {

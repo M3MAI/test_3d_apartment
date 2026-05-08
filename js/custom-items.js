@@ -192,27 +192,28 @@ function downscaleImage(img) {
   return { dataUrl: canvas.toDataURL("image/jpeg", 0.88), canvas, ctx };
 }
 
-// Sample the average edge color of an image's canvas; used as the box side color in 3D.
+// Sample the dominant furniture color from the CENTER of the image (not edges).
+// Edges often contain background/room pixels giving wrong colors. The center
+// region (inner 50%) is much more likely to contain the actual furniture.
 function sampleEdgeColor(canvas) {
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
-  const strip = 2;
-  const samples = [];
+  // Sample from the center 50% of the image
+  const x0 = Math.round(w * 0.25), y0 = Math.round(h * 0.25);
+  const cw = Math.round(w * 0.5), ch = Math.round(h * 0.5);
+  let imgData;
   try {
-    samples.push(ctx.getImageData(0, 0, w, strip));              // top
-    samples.push(ctx.getImageData(0, h - strip, w, strip));      // bottom
-    samples.push(ctx.getImageData(0, 0, strip, h));              // left
-    samples.push(ctx.getImageData(w - strip, 0, strip, h));      // right
+    imgData = ctx.getImageData(x0, y0, cw, ch);
   } catch {
     return "#888888";
   }
+  const d = imgData.data;
   let r = 0, g = 0, b = 0, n = 0;
-  for (const s of samples) {
-    for (let i = 0; i < s.data.length; i += 4) {
-      const a = s.data[i + 3];
-      if (a < 32) continue;
-      r += s.data[i]; g += s.data[i + 1]; b += s.data[i + 2]; n++;
-    }
+  // Sample every 4th pixel for performance
+  for (let i = 0; i < d.length; i += 16) {
+    const a = d[i + 3];
+    if (a < 32) continue;
+    r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
   }
   if (!n) return "#888888";
   r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
