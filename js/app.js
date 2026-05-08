@@ -1274,32 +1274,78 @@ function bindTopbar() {
 }
 
 function exportJSON() {
-  const blob = new Blob([JSON.stringify(state.layouts, null, 2)], { type: "application/json" });
+  // Export COMPLETE project: layouts + custom items + room overrides + prices
+  const project = {
+    _format: "apt-designer-project",
+    _version: 2,
+    _date: new Date().toISOString(),
+    layouts: state.layouts,
+    overrides: loadRoomOverrides(),
+    prices: state.prices,
+    customItems: window.CustomItems.all(),
+  };
+  const json = JSON.stringify(project);
+  const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "apartment-layout.json";
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.download = `apartment-project-${dateStr}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  toast("تم تصدير المشروع كاملاً");
 }
 function importJSON(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const data = JSON.parse(reader.result);
-      if (typeof data !== "object" || Array.isArray(data)) throw new Error();
+      if (typeof data !== "object" || Array.isArray(data)) throw new Error("invalid");
+
+      // Support both old format (just layouts) and new full project format
+      const isFullProject = data._format === "apt-designer-project";
+
+      if (isFullProject) {
+        if (!confirm("هل تريد استيراد هذا المشروع؟\nسيتم استبدال التصميم الحالي والعناصر المخصصة.")) return;
+      }
+
       pushHistory();
-      state.layouts = data;
-      saveLayouts();
+
+      if (isFullProject) {
+        // Restore layouts
+        state.layouts = data.layouts || {};
+        saveLayouts();
+
+        // Restore room overrides
+        if (data.overrides) saveRoomOverrides(data.overrides);
+
+        // Restore prices
+        if (data.prices) { state.prices = data.prices; savePrices(); }
+
+        // Restore custom items (merge or replace)
+        if (data.customItems && Array.isArray(data.customItems)) {
+          await window.CustomItems.clear();
+          for (const item of data.customItems) {
+            await window.CustomItems.add(item);
+          }
+        }
+      } else {
+        // Legacy format: just layouts object
+        state.layouts = data;
+        saveLayouts();
+      }
+
       state.selectedInstId = null;
       drawRoom();
       renderSelection();
       renderRoomList();
-      toast("تم الاستيراد");
-    } catch {
-      toast("ملف JSON غير صالح", "err");
+      renderCatalog();
+      toast(isFullProject ? "تم استيراد المشروع كاملاً ✓" : "تم الاستيراد");
+    } catch (err) {
+      console.error("Import error:", err);
+      toast("ملف غير صالح", "err");
     }
   };
   reader.readAsText(file);
