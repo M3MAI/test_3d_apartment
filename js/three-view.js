@@ -21,6 +21,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const WALL_HEIGHT   = 270;     // cm — default ceiling height when room.height is missing
 const WALL_THICK_3D = 10;      // cm
@@ -107,9 +108,15 @@ function show(container, opts) {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
-  renderer.outputColorSpace = THREE.SRGBColorSpace; // correct color for GLB/PBR textures
-  renderer.domElement.style.touchAction = "none"; // we drive gestures ourselves
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
+
+  // Environment map for PBR/GLB materials (makes them show true colors)
+  const pmremGen = new THREE.PMREMGenerator(renderer);
+  pmremGen.compileEquirectangularShader();
+  scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
+  pmremGen.dispose();
 
   // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.8));
@@ -1593,6 +1600,12 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
+
+  // Environment map for PBR/GLB materials
+  const pmremGen = new THREE.PMREMGenerator(renderer);
+  pmremGen.compileEquirectangularShader();
+  scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
+  pmremGen.dispose();
 
   // Lights
   const ambient = new THREE.AmbientLight(0xffffff, 0.7);
