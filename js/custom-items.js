@@ -85,6 +85,14 @@ const CustomItems = {
       // IDB unavailable — keep localStorage cache.
     }
     this._ready = true;
+    // Force-slim localStorage to free quota (old versions stored full images)
+    try {
+      const slim = (this._cache || []).map(it => {
+        const { image, imageSide, imageTop, autoSide, autoTop, glbData, _rawImage, ...meta } = it;
+        return meta;
+      });
+      localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(slim));
+    } catch { /* ignore */ }
     return this._cache;
   },
   all() {
@@ -105,19 +113,19 @@ const CustomItems = {
       idbOk = true;
     } catch (e) { /* IDB unavailable */ }
     try {
-      // Best-effort metadata cache in localStorage. If full, drop the images.
-      const fullJson = JSON.stringify(this._cache || []);
-      localStorage.setItem(CUSTOM_ITEMS_KEY, fullJson);
+      // Best-effort metadata cache in localStorage (for cold-load painting).
+      // Strip ALL heavy data — images, GLB, auto-textures.
+      // Full data lives in IndexedDB which has 50MB+ quota.
+      const slim = (this._cache || []).map(it => {
+        const { image, imageSide, imageTop, autoSide, autoTop, glbData, _rawImage, ...meta } = it;
+        return meta;
+      });
+      localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(slim));
     } catch (e) {
-      try {
-        // Strip image data URLs to fit metadata-only into localStorage.
-        const slim = (this._cache || []).map(({ image, ...rest }) => rest);
-        localStorage.setItem(CUSTOM_ITEMS_KEY, JSON.stringify(slim));
-      } catch (e2) {
-        if (!idbOk) {
-          if (window.toast) window.toast("ذاكرة المتصفح ممتلئة — احذف بعض العناصر المخصصة أو صدّر التصميم ثم أعد الضبط", "err");
-          return false;
-        }
+      // Even metadata didn't fit — that's OK if IDB worked
+      if (!idbOk) {
+        if (window.toast) window.toast("ذاكرة المتصفح ممتلئة — احذف بعض العناصر المخصصة أو صدّر التصميم ثم أعد الضبط", "err");
+        return false;
       }
     }
     return idbOk || true;
