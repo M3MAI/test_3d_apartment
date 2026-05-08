@@ -3394,13 +3394,14 @@ async function maybeLoadStateFromUrl() {
 
 // ---- Cloud save/load (jsonblob.com — free, no API key, no signup) ----
 
-// Shrink a data URL image to max 400px longest side, JPEG quality 0.5
+// Shrink a data URL image to max 600px longest side, JPEG quality 0.65
+// Balances visual quality with cloud storage size
 function compressImageForCloud(dataUrl) {
   if (!dataUrl || !dataUrl.startsWith("data:image")) return dataUrl;
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const maxSz = 400;
+      const maxSz = 600;
       const scale = Math.min(1, maxSz / Math.max(img.width, img.height));
       const w = Math.round(img.width * scale);
       const h = Math.round(img.height * scale);
@@ -3408,7 +3409,7 @@ function compressImageForCloud(dataUrl) {
       c.width = w; c.height = h;
       const ctx = c.getContext("2d");
       ctx.drawImage(img, 0, 0, w, h);
-      resolve(c.toDataURL("image/jpeg", 0.5));
+      resolve(c.toDataURL("image/jpeg", 0.65));
     };
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
@@ -3432,16 +3433,19 @@ async function saveToCloud() {
     const allCustom = window.CustomItems.all();
     const usedItems = allCustom.filter(it => usedIds.has(it.id));
 
-    // Compress images to reduce cloud payload size
+    // Compress images but keep ALL data (GLB included) so recipient sees everything
     const compressedItems = [];
     for (const item of usedItems) {
       const clone = { ...item };
+      // Compress photo textures (reduce resolution/quality)
       if (clone.image) clone.image = await compressImageForCloud(clone.image);
       if (clone.autoSide) clone.autoSide = await compressImageForCloud(clone.autoSide);
       if (clone.autoTop) clone.autoTop = await compressImageForCloud(clone.autoTop);
       if (clone.imageSide) clone.imageSide = await compressImageForCloud(clone.imageSide);
       if (clone.imageTop) clone.imageTop = await compressImageForCloud(clone.imageTop);
-      // GLB data is binary — keep as-is (it's already compact)
+      // Keep glbData — the recipient must see the exact 3D model
+      // Only strip internal cache fields
+      delete clone._rawImage;
       compressedItems.push(clone);
     }
 
@@ -3455,28 +3459,60 @@ async function saveToCloud() {
       customItems: compressedItems,
     };
 
-    // POST to jsonblob.com
-    const resp = await fetch("https://jsonblob.com/api/jsonBlob", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const jsonStr = JSON.stringify(payload);
+    const sizeMB = (jsonStr.length / (1024 * 1024)).toFixed(1);
+    btn.textContent = `⏳ رفع ${sizeMB} MB...`;
 
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-
-    // The blob ID is in the Location header or the URL
-    const loc = resp.headers.get("Location") || "";
-    const blobId = loc.split("/").pop();
-    if (!blobId) throw new Error("No blob ID returned");
-
-    // Build short share URL
-    const shareUrl = location.origin + location.pathname + "#c=" + blobId;
-
+    // Try npoint.io (free, CORS-enabled, no signup, up to ~10MB)
+    let shareUrl = null;
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast("✅ تم الحفظ! تم نسخ الرابط إلى الحافظة");
-    } catch {
-      prompt("تم الحفظ! انسخ هذا الرابط:", shareUrl);
+      const resp = await fetch("https://api.npoint.io/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonStr,
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const result = await resp.json();
+      // npoint returns the document URL or ID in the response
+      const docId = result.id || (typeof result === "string" ? result : null);
+      if (!docId) throw new Error("No ID returned");
+      shareUrl = location.origin + location.pathname + "#c=" + docId;
+    } catch (npErr) {
+      console.warn("npoint.io failed:", npErr);
+      // Fallback: try json.extendsclass.com
+      try {
+        const resp2 = await fetch("https://json.extendsclass.com/bin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: jsonStr,
+        });
+        if (!resp2.ok) throw new Error("HTTP " + resp2.status);
+        const result2 = await resp2.json();
+        const binId = result2.id || (result2.uri && result2.uri.replace("/bin/", ""));
+        if (!binId) throw new Error("No bin ID");
+        shareUrl = location.origin + location.pathname + "#e=" + binId;
+      } catch (ecErr) {
+        console.warn("extendsclass.com failed:", ecErr);
+      }
+    }
+
+    if (shareUrl) {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        toast("✅ تم الحفظ! تم نسخ الرابط إلى الحافظة");
+      } catch {
+        prompt("تم الحفظ! انسخ هذا الرابط:", shareUrl);
+      }
+    } else {
+      // Final fallback: download as file
+      toast("تعذّر الحفظ السحابي — سيتم تحميل ملف بدلاً", "warn");
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `apartment-share-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   } catch (e) {
     console.error("Cloud save error:", e);
@@ -3489,9 +3525,13 @@ async function saveToCloud() {
 
 async function loadFromCloud() {
   const h = location.hash || "";
-  const m = h.match(/^#c=(.+)$/);
-  if (!m) return;
-  const blobId = m[1];
+  // Support both #c=<npoint-id> and #e=<extendsclass-id>
+  const npMatch = h.match(/^#c=(.+)$/);
+  const ecMatch = h.match(/^#e=(.+)$/);
+  if (!npMatch && !ecMatch) return;
+
+  const isNpoint = !!npMatch;
+  const docId = isNpoint ? npMatch[1] : ecMatch[1];
 
   try {
     if (!confirm("هل تريد تحميل التصميم المحفوظ من السحابة؟\n(سيستبدل تصميمك الحالي)")) {
@@ -3499,13 +3539,17 @@ async function loadFromCloud() {
       return;
     }
 
-    const resp = await fetch("https://jsonblob.com/api/jsonBlob/" + blobId, {
+    const apiUrl = isNpoint
+      ? "https://api.npoint.io/" + docId
+      : "https://json.extendsclass.com/bin/" + docId;
+
+    const resp = await fetch(apiUrl, {
       headers: { "Accept": "application/json" },
     });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     const data = await resp.json();
 
-    if (!data || !data.layouts) throw new Error("Invalid data");
+    if (!data || !data.layouts) throw new Error("بيانات غير صالحة");
 
     // Restore state
     if (data.overrides) saveRoomOverrides(data.overrides);
@@ -3528,7 +3572,7 @@ async function loadFromCloud() {
     location.reload();
   } catch (e) {
     console.error("Cloud load error:", e);
-    toast("فشل تحميل التصميم من السحابة — " + e.message, "err");
+    toast("فشل تحميل التصميم — " + e.message, "err");
     history.replaceState(null, "", location.pathname);
   }
 }
