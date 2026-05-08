@@ -626,6 +626,7 @@ document.addEventListener("DOMContentLoaded", () => {
   applyTheme(localStorage.getItem(THEME_KEY) || "light");
   applyRoomOverrides();
   maybeLoadStateFromUrl();
+  loadFromCloud(); // check for #c=<blobId> cloud share URLs
   renderRoomList();
   renderCatalog();
   // Hydrate CustomItems from IndexedDB (or migrate from legacy localStorage)
@@ -3308,30 +3309,58 @@ function bindShareExportButtons() {
   document.getElementById("btn-share").addEventListener("click", shareViaUrl);
   document.getElementById("btn-png").addEventListener("click", downloadScreenshot);
   document.getElementById("btn-glb").addEventListener("click", downloadGlb);
+  const cloudBtn = document.getElementById("btn-cloud-save");
+  if (cloudBtn) cloudBtn.addEventListener("click", saveToCloud);
 }
 async function shareViaUrl() {
-  // Encode layouts + overrides as compressed base64 → add to URL
   try {
+    // Collect custom item IDs that are actually placed in any room layout
+    const usedCustomIds = new Set();
+    for (const roomId in state.layouts) {
+      for (const inst of state.layouts[roomId]) {
+        if (inst.groupId === "custom") usedCustomIds.add(inst.itemId);
+      }
+    }
+    // Include only the used custom items (with their image/GLB data)
+    const allCustom = window.CustomItems.all();
+    const usedCustomItems = allCustom.filter(it => usedCustomIds.has(it.id));
+
     const payload = {
-      v: 1,
+      v: 2,
       layouts: state.layouts,
       overrides: loadRoomOverrides(),
       prices: state.prices,
+      customItems: usedCustomItems,
     };
     const json = JSON.stringify(payload);
     const b64 = btoa(unescape(encodeURIComponent(json)));
+
+    // URLs longer than ~32KB are unreliable in many browsers. Fall back to file.
+    if (b64.length > 32000) {
+      toast("المشروع كبير — سيتم تحميل ملف بدلاً من رابط", "warn");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `apartment-share-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
     const url = location.origin + location.pathname + "#s=" + b64;
     try {
       await navigator.clipboard.writeText(url);
-      toast("تم نسخ رابط المشاركة إلى الحافظة");
+      toast("تم نسخ رابط المشاركة إلى الحافظة ✓");
     } catch {
       prompt("انسخ الرابط التالي:", url);
     }
   } catch (e) {
+    console.error("Share error:", e);
     toast("تعذّر إنشاء رابط المشاركة", "err");
   }
 }
-function maybeLoadStateFromUrl() {
+async function maybeLoadStateFromUrl() {
   const h = location.hash || "";
   const m = h.match(/^#s=(.+)$/);
   if (!m) return;
@@ -3344,11 +3373,164 @@ function maybeLoadStateFromUrl() {
       if (data.prices)    { state.prices = data.prices; savePrices(); }
       state.layouts = data.layouts;
       saveLayouts();
+
+      // Restore custom items from share URL
+      if (data.customItems && Array.isArray(data.customItems) && data.customItems.length > 0) {
+        const existing = window.CustomItems.all();
+        const existingIds = new Set(existing.map(i => i.id));
+        for (const item of data.customItems) {
+          if (!existingIds.has(item.id)) {
+            await window.CustomItems.add(item);
+          }
+        }
+      }
+
       // Clear hash so refresh doesn't re-prompt.
       history.replaceState(null, "", location.pathname);
       location.reload();
     }
   } catch (e) { /* ignore malformed */ }
+}
+
+// ---- Cloud save/load (jsonblob.com — free, no API key, no signup) ----
+
+// Shrink a data URL image to max 400px longest side, JPEG quality 0.5
+function compressImageForCloud(dataUrl) {
+  if (!dataUrl || !dataUrl.startsWith("data:image")) return dataUrl;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxSz = 400;
+      const scale = Math.min(1, maxSz / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL("image/jpeg", 0.5));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+async function saveToCloud() {
+  const btn = document.getElementById("btn-cloud-save");
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ جاري الحفظ...";
+
+  try {
+    // Collect used custom items
+    const usedIds = new Set();
+    for (const roomId in state.layouts) {
+      for (const inst of state.layouts[roomId]) {
+        if (inst.groupId === "custom") usedIds.add(inst.itemId);
+      }
+    }
+    const allCustom = window.CustomItems.all();
+    const usedItems = allCustom.filter(it => usedIds.has(it.id));
+
+    // Compress images to reduce cloud payload size
+    const compressedItems = [];
+    for (const item of usedItems) {
+      const clone = { ...item };
+      if (clone.image) clone.image = await compressImageForCloud(clone.image);
+      if (clone.autoSide) clone.autoSide = await compressImageForCloud(clone.autoSide);
+      if (clone.autoTop) clone.autoTop = await compressImageForCloud(clone.autoTop);
+      if (clone.imageSide) clone.imageSide = await compressImageForCloud(clone.imageSide);
+      if (clone.imageTop) clone.imageTop = await compressImageForCloud(clone.imageTop);
+      // GLB data is binary — keep as-is (it's already compact)
+      compressedItems.push(clone);
+    }
+
+    const payload = {
+      _format: "apt-designer-cloud",
+      _version: 1,
+      _date: new Date().toISOString(),
+      layouts: state.layouts,
+      overrides: loadRoomOverrides(),
+      prices: state.prices,
+      customItems: compressedItems,
+    };
+
+    // POST to jsonblob.com
+    const resp = await fetch("https://jsonblob.com/api/jsonBlob", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+    // The blob ID is in the Location header or the URL
+    const loc = resp.headers.get("Location") || "";
+    const blobId = loc.split("/").pop();
+    if (!blobId) throw new Error("No blob ID returned");
+
+    // Build short share URL
+    const shareUrl = location.origin + location.pathname + "#c=" + blobId;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast("✅ تم الحفظ! تم نسخ الرابط إلى الحافظة");
+    } catch {
+      prompt("تم الحفظ! انسخ هذا الرابط:", shareUrl);
+    }
+  } catch (e) {
+    console.error("Cloud save error:", e);
+    toast("فشل الحفظ السحابي — " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+async function loadFromCloud() {
+  const h = location.hash || "";
+  const m = h.match(/^#c=(.+)$/);
+  if (!m) return;
+  const blobId = m[1];
+
+  try {
+    if (!confirm("هل تريد تحميل التصميم المحفوظ من السحابة؟\n(سيستبدل تصميمك الحالي)")) {
+      history.replaceState(null, "", location.pathname);
+      return;
+    }
+
+    const resp = await fetch("https://jsonblob.com/api/jsonBlob/" + blobId, {
+      headers: { "Accept": "application/json" },
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+
+    if (!data || !data.layouts) throw new Error("Invalid data");
+
+    // Restore state
+    if (data.overrides) saveRoomOverrides(data.overrides);
+    if (data.prices) { state.prices = data.prices; savePrices(); }
+    state.layouts = data.layouts;
+    saveLayouts();
+
+    // Restore custom items
+    if (data.customItems && Array.isArray(data.customItems)) {
+      const existing = window.CustomItems.all();
+      const existingIds = new Set(existing.map(i => i.id));
+      for (const item of data.customItems) {
+        if (!existingIds.has(item.id)) {
+          await window.CustomItems.add(item);
+        }
+      }
+    }
+
+    history.replaceState(null, "", location.pathname);
+    location.reload();
+  } catch (e) {
+    console.error("Cloud load error:", e);
+    toast("فشل تحميل التصميم من السحابة — " + e.message, "err");
+    history.replaceState(null, "", location.pathname);
+  }
 }
 function downloadScreenshot() {
   if (!window.AptThreeView || !window.AptThreeView.screenshotPNG) {
