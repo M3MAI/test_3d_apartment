@@ -333,7 +333,7 @@ function meshSignature(inst, item) {
     item.color || "",
     item.image ? "img" : "flat",
     item.hasAlpha ? "alpha" : "",
-    item.billboard ? "bb" : "",
+    item.useBox ? "box" : "bb",
     item.imageSide ? "side" : "",
     item.imageTop ? "top" : "",
   ].join("|");
@@ -1422,7 +1422,9 @@ function buildFurnitureMesh(inst, item) {
   const d = inst.overrideH || item.h;
   const h = inst.overrideDepth || item.depth || defaultHeight(item);
   const isCustom = inst.groupId === "custom" && item.image;
-  const isBillboard = isCustom && (item.billboard || d < 5);
+  // Billboard (standing cutout) is DEFAULT for custom furniture — shows the
+  // actual furniture shape from the photo. Box mode is opt-in via "useBox".
+  const isBillboard = isCustom && !item.useBox;
   const hasAlpha = isCustom && item.hasAlpha;
   const geom = isBillboard ? new THREE.PlaneGeometry(w, h) : new THREE.BoxGeometry(w, h, d);
   let materials;

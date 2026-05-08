@@ -929,7 +929,7 @@ function bindCustomModal() {
   const bgVal     = document.getElementById("ci-bg-val");
   const sideInput = document.getElementById("ci-image-side");
   const topInput  = document.getElementById("ci-image-top");
-  const billboardCb = document.getElementById("ci-billboard");
+  const useBoxCb = document.getElementById("ci-usebox");
   let rawImageData = null;       // original image data URL before bg removal
   let processedSide = null;      // { image, sideColor } for side photo
   let processedTop = null;       // { image } for top photo
@@ -944,7 +944,7 @@ function bindCustomModal() {
     imgInput.value = "";
     if (sideInput) sideInput.value = "";
     if (topInput) topInput.value = "";
-    if (billboardCb) billboardCb.checked = false;
+    if (useBoxCb) useBoxCb.checked = false;
     preview.innerHTML = `<span class="ph">لم يتم اختيار صورة</span>`;
     err.hidden = true; err.textContent = "";
     processed = null;
@@ -968,7 +968,7 @@ function bindCustomModal() {
     document.getElementById("ci-h").value = item.depth || 80;
     document.getElementById("ci-cat").value = item.category || "common";
     document.getElementById("ci-price").value = item.price || "";
-    if (billboardCb) billboardCb.checked = !!item.billboard;
+    if (useBoxCb) useBoxCb.checked = !!item.useBox;
     if (item.image) preview.innerHTML = `<img src="${esc(item.image)}" alt="معاينة" />`;
     // Keep existing image unless a new file is chosen.
     processed = item.image ? { image: item.image, sideColor: item.sideColor || item.color } : null;
@@ -1061,14 +1061,14 @@ function bindCustomModal() {
     const cat = document.getElementById("ci-cat").value;
     const priceRaw = document.getElementById("ci-price").value.trim();
     const price = priceRaw === "" ? 0 : Math.max(0, parseInt(priceRaw, 10) || 0);
-    const billboard = billboardCb ? billboardCb.checked : false;
+    const useBox = useBoxCb ? useBoxCb.checked : false;
     const editingId = editIdInput.value;
     if (!name) { err.textContent = "اكتب اسمًا للعنصر"; err.hidden = false; return; }
     if (!processed) { err.textContent = "ارفع صورة للعنصر"; err.hidden = false; return; }
     if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
 
     const payload = {
-      name, w, h: d, depth: h, category: cat, price, billboard,
+      name, w, h: d, depth: h, category: cat, price, useBox,
       color: processed.sideColor, sideColor: processed.sideColor,
       image: processed.image,
       hasAlpha: processed.hasAlpha || false,
