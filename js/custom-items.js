@@ -365,7 +365,38 @@ async function processCustomImage(file, bgRemovalTolerance) {
   if (bgRemovalTolerance != null && bgRemovalTolerance > 0) {
     finalImage = removeBackground(canvas, bgRemovalTolerance);
   }
-  return { image: finalImage, sideColor, hasAlpha: bgRemovalTolerance > 0 };
+  // Auto-generate side and top textures from the front photo edge strips.
+  // This makes box mode look 10x better — sides show continuity from photo.
+  const autoSide = generateEdgeStrip(canvas, "side");
+  const autoTop = generateEdgeStrip(canvas, "top");
+  return { image: finalImage, sideColor, hasAlpha: bgRemovalTolerance > 0, autoSide, autoTop };
+}
+
+// Generate a texture from an edge strip of the source image.
+// mode = "side": takes the left 15% and stretches it to a square.
+// mode = "top": takes the top 15% and stretches it to a square.
+// This creates visual continuity for box-mode 3D rendering.
+function generateEdgeStrip(canvas, mode) {
+  const sw = canvas.width, sh = canvas.height;
+  const sz = 128; // output texture size
+  const out = document.createElement("canvas");
+  out.width = sz; out.height = sz;
+  const ctx = out.getContext("2d");
+  if (mode === "side") {
+    // Take left 15% strip, stretch to fill square
+    const strip = Math.max(4, Math.round(sw * 0.15));
+    ctx.drawImage(canvas, 0, 0, strip, sh, 0, 0, sz, sz);
+  } else {
+    // Take top 15% strip, stretch to fill square
+    const strip = Math.max(4, Math.round(sh * 0.15));
+    ctx.drawImage(canvas, 0, 0, sw, strip, 0, 0, sz, sz);
+  }
+  // Apply a slight blur effect by drawing semi-transparent over itself
+  ctx.globalAlpha = 0.3;
+  ctx.drawImage(out, -1, -1, sz + 2, sz + 2);
+  ctx.drawImage(out, 1, 1, sz + 2, sz + 2);
+  ctx.globalAlpha = 1.0;
+  return out.toDataURL("image/jpeg", 0.7);
 }
 
 // Re-process an existing data URL with background removal (for preview/slider)
@@ -379,8 +410,10 @@ async function reprocessWithBgRemoval(dataUrl, tolerance) {
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0);
       const sideColor = sampleEdgeColor(canvas);
+      const autoSide = generateEdgeStrip(canvas, "side");
+      const autoTop = generateEdgeStrip(canvas, "top");
       const result = tolerance > 0 ? removeBackground(canvas, tolerance) : dataUrl;
-      resolve({ image: result, sideColor, hasAlpha: tolerance > 0 });
+      resolve({ image: result, sideColor, hasAlpha: tolerance > 0, autoSide, autoTop });
     };
     img.src = dataUrl;
   });

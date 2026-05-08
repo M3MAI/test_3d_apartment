@@ -20,6 +20,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const WALL_HEIGHT   = 270;     // cm — default ceiling height when room.height is missing
 const WALL_THICK_3D = 10;      // cm
@@ -280,6 +281,13 @@ function show(container, opts) {
       selectionHelper.visible = false;
     }
 
+    // Billboard cutouts: rotate to face camera so the photo is always visible
+    ctx.instMeshes.forEach((mesh) => {
+      if (mesh.userData._isBillboard) {
+        mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+      }
+    });
+
     renderer.render(scene, camera);
   };
   loop();
@@ -336,6 +344,9 @@ function meshSignature(inst, item) {
     item.useBox ? "box" : "bb",
     item.imageSide ? "side" : "",
     item.imageTop ? "top" : "",
+    item.autoSide ? "as" : "",
+    item.autoTop ? "at" : "",
+    item.glbData ? "glb" : "",
   ].join("|");
 }
 
@@ -344,12 +355,17 @@ function applyInstTransform(mesh, inst, item) {
   const d = inst.overrideH || item.h;
   const h = inst.overrideDepth || item.depth || defaultHeight(item);
   const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
-  mesh.position.set(inst.x, h / 2 + lift, inst.y);
-  mesh.rotation.set(
-    -((inst.rotationX || 0) * Math.PI) / 180,
-    -((inst.rotation  || 0) * Math.PI) / 180,
-    -((inst.rotationZ || 0) * Math.PI) / 180
-  );
+  // GLB models sit on the ground; photo meshes center at h/2
+  const yPos = mesh.userData._isGLB ? lift : (h / 2 + lift);
+  mesh.position.set(inst.x, yPos, inst.y);
+  // Billboard meshes auto-face camera in the render loop — skip manual rotation
+  if (!mesh.userData._isBillboard) {
+    mesh.rotation.set(
+      -((inst.rotationX || 0) * Math.PI) / 180,
+      -((inst.rotation  || 0) * Math.PI) / 180,
+      -((inst.rotationZ || 0) * Math.PI) / 180
+    );
+  }
   mesh.userData.rotation = inst.rotation || 0;
 }
 
@@ -1422,19 +1438,64 @@ function buildFurnitureMesh(inst, item) {
   const d = inst.overrideH || item.h;
   const h = inst.overrideDepth || item.depth || defaultHeight(item);
   const isCustom = inst.groupId === "custom" && item.image;
-  // Billboard (standing cutout) is DEFAULT for custom furniture — shows the
-  // actual furniture shape from the photo. Box mode is opt-in via "useBox".
-  const isBillboard = isCustom && !item.useBox;
+  const isBillboard = isCustom && !item.useBox && !item.glbData;
   const hasAlpha = isCustom && item.hasAlpha;
+  const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
+
+  // --- GLB 3D model support ---
+  if (item.glbData) {
+    const container = new THREE.Group();
+    container.userData.groupId = inst.groupId;
+    container.userData.itemId = inst.itemId;
+    container.userData.rotation = inst.rotation || 0;
+    container.userData._isGLB = true;
+    container.position.set(inst.x, lift, inst.y);
+    container.rotation.set(
+      -((inst.rotationX || 0) * Math.PI) / 180,
+      -((inst.rotation  || 0) * Math.PI) / 180,
+      -((inst.rotationZ || 0) * Math.PI) / 180
+    );
+    // Load GLB asynchronously
+    const loader = new GLTFLoader();
+    const binary = Uint8Array.from(atob(item.glbData), c => c.charCodeAt(0));
+    loader.parse(binary.buffer, "", (gltf) => {
+      const model = gltf.scene;
+      // Compute bounding box to scale to user dimensions
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const scaleX = w / (size.x || 1);
+      const scaleY = h / (size.y || 1);
+      const scaleZ = d / (size.z || 1);
+      model.scale.set(scaleX, scaleY, scaleZ);
+      // Center the model and place on the ground
+      const newBox = new THREE.Box3().setFromObject(model);
+      const center = newBox.getCenter(new THREE.Vector3());
+      const minY = newBox.min.y;
+      model.position.sub(center);
+      model.position.y -= minY; // ground the model
+      model.traverse(child => {
+        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+      });
+      container.add(model);
+    }, (err) => { console.warn("GLB parse error:", err); });
+    // Add contact shadow
+    const shGeo = new THREE.PlaneGeometry(w * 0.9, d * 0.9);
+    const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.3, depthWrite: false });
+    const shMesh = new THREE.Mesh(shGeo, shMat);
+    shMesh.rotation.x = -Math.PI / 2;
+    shMesh.position.y = 0.5;
+    container.add(shMesh);
+    return container;
+  }
+
+  // --- Photo-based rendering (billboard or box) ---
   const geom = isBillboard ? new THREE.PlaneGeometry(w, h) : new THREE.BoxGeometry(w, h, d);
   let materials;
   if (isCustom) {
     const sideColor = hexToInt(item.sideColor || item.color || "#888888");
-    const loader = new THREE.TextureLoader();
-    const loadTex = (url) => { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const texLoader = new THREE.TextureLoader();
+    const loadTex = (url) => { const t = texLoader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; };
     const frontTex = loadTex(item.image);
-    // Use MeshBasicMaterial for photo faces — renders EXACT photo pixels
-    // regardless of scene lighting. MeshStandardMaterial tints/darkens photos.
     const frontMatOpts = { map: frontTex };
     if (hasAlpha) { frontMatOpts.transparent = true; frontMatOpts.alphaTest = 0.08; frontMatOpts.side = THREE.DoubleSide; }
     const frontMat = new THREE.MeshBasicMaterial(frontMatOpts);
@@ -1442,22 +1503,25 @@ function buildFurnitureMesh(inst, item) {
       frontMat.side = THREE.DoubleSide;
       materials = frontMat;
     } else {
-      // Sides use the dominant color sampled from photo center
-      const sideMat = new THREE.MeshBasicMaterial({ color: sideColor, transparent: hasAlpha, opacity: hasAlpha ? 0.85 : 1 });
-      const topMat = new THREE.MeshBasicMaterial({ color: lighter(sideColor, -0.08) });
-      let sideTexMat = sideMat;
-      if (item.imageSide) {
-        const sideTex = loadTex(item.imageSide);
-        sideTexMat = new THREE.MeshBasicMaterial({ map: sideTex, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 });
+      // Use auto-generated edge strip textures if no user-supplied side/top photos
+      const sideImgUrl = item.imageSide || item.autoSide;
+      const topImgUrl = item.imageTop || item.autoTop;
+      let sideTexMat;
+      if (sideImgUrl) {
+        sideTexMat = new THREE.MeshBasicMaterial({ map: loadTex(sideImgUrl) });
+      } else {
+        sideTexMat = new THREE.MeshBasicMaterial({ color: sideColor });
       }
-      let topTexMat = topMat;
-      if (item.imageTop) {
-        const topTex = loadTex(item.imageTop);
-        topTexMat = new THREE.MeshBasicMaterial({ map: topTex });
+      let topTexMat;
+      if (topImgUrl) {
+        topTexMat = new THREE.MeshBasicMaterial({ map: loadTex(topImgUrl) });
+      } else {
+        topTexMat = new THREE.MeshBasicMaterial({ color: lighter(sideColor, -0.08) });
       }
       const backMat = frontMat.clone();
+      const bottomMat = new THREE.MeshBasicMaterial({ color: lighter(sideColor, -0.15) });
       // [+x, -x, +y, -y, +z, -z] = right, left, top, bottom, front, back
-      materials = [sideTexMat, sideTexMat.clone(), topTexMat, sideMat.clone(), frontMat, backMat];
+      materials = [sideTexMat, sideTexMat.clone(), topTexMat, bottomMat, frontMat, backMat];
     }
   } else {
     materials = new THREE.MeshStandardMaterial({ color: hexToInt(item.color || "#888888"), roughness: 0.8, transparent: (item.opacity ?? 1) < 1, opacity: item.opacity ?? 1 });
@@ -1466,15 +1530,17 @@ function buildFurnitureMesh(inst, item) {
   mesh.castShadow = true; mesh.receiveShadow = true;
   mesh.userData.groupId = inst.groupId; mesh.userData.itemId = inst.itemId;
   mesh.userData.rotation = inst.rotation || 0;
-  const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
+  mesh.userData._isBillboard = isBillboard; // flag for camera-facing in render loop
   mesh.position.set(inst.x, h / 2 + lift, inst.y);
-  mesh.rotation.set(
-    -((inst.rotationX || 0) * Math.PI) / 180,
-    -((inst.rotation  || 0) * Math.PI) / 180,
-    -((inst.rotationZ || 0) * Math.PI) / 180
-  );
+  if (!isBillboard) {
+    mesh.rotation.set(
+      -((inst.rotationX || 0) * Math.PI) / 180,
+      -((inst.rotation  || 0) * Math.PI) / 180,
+      -((inst.rotationZ || 0) * Math.PI) / 180
+    );
+  }
   if (isCustom) {
-    const shGeo = new THREE.PlaneGeometry(w * 0.9, d < 5 ? w * 0.3 : d * 0.9);
+    const shGeo = new THREE.PlaneGeometry(w * 0.9, isBillboard ? w * 0.3 : d * 0.9);
     const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.25, depthWrite: false });
     const shMesh = new THREE.Mesh(shGeo, shMat);
     shMesh.rotation.x = -Math.PI / 2;
@@ -1757,6 +1823,13 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
       p.x = Math.max(10, Math.min(bounds.w - 10, p.x));
       p.z = Math.max(10, Math.min(bounds.h - 10, p.z));
     }
+
+    // Billboard cutouts face camera in walkthrough too
+    furnitureGroup.children.forEach(mesh => {
+      if (mesh.userData._isBillboard) {
+        mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+      }
+    });
 
     renderer.render(scene, camera);
   };

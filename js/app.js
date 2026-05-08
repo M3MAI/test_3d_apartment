@@ -929,10 +929,12 @@ function bindCustomModal() {
   const bgVal     = document.getElementById("ci-bg-val");
   const sideInput = document.getElementById("ci-image-side");
   const topInput  = document.getElementById("ci-image-top");
+  const glbInput  = document.getElementById("ci-glb");
   const useBoxCb = document.getElementById("ci-usebox");
   let rawImageData = null;       // original image data URL before bg removal
   let processedSide = null;      // { image, sideColor } for side photo
   let processedTop = null;       // { image } for top photo
+  let glbBase64 = null;          // base64-encoded GLB file data
 
   function reset() {
     document.getElementById("ci-name").value = "";
@@ -944,6 +946,7 @@ function bindCustomModal() {
     imgInput.value = "";
     if (sideInput) sideInput.value = "";
     if (topInput) topInput.value = "";
+    if (glbInput) glbInput.value = "";
     if (useBoxCb) useBoxCb.checked = false;
     preview.innerHTML = `<span class="ph">لم يتم اختيار صورة</span>`;
     err.hidden = true; err.textContent = "";
@@ -951,6 +954,7 @@ function bindCustomModal() {
     rawImageData = null;
     processedSide = null;
     processedTop = null;
+    glbBase64 = null;
     editIdInput.value = "";
     title.textContent = "إضافة عنصر مخصص";
     saveBtn.textContent = "إضافة للكتالوج";
@@ -1053,6 +1057,27 @@ function bindCustomModal() {
     });
   }
 
+  // GLB 3D model file handler
+  if (glbInput) {
+    glbInput.addEventListener("change", () => {
+      const file = glbInput.files[0];
+      if (!file) { glbBase64 = null; return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        // Convert ArrayBuffer to base64
+        const bytes = new Uint8Array(reader.result);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        glbBase64 = btoa(binary);
+        // Auto-set a placeholder processed if no image was uploaded
+        if (!processed) {
+          processed = { image: "", sideColor: "#888888", hasAlpha: false };
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   saveBtn.addEventListener("click", async () => {
     const name = document.getElementById("ci-name").value.trim();
     const w = parseInt(document.getElementById("ci-w").value, 10);
@@ -1064,18 +1089,24 @@ function bindCustomModal() {
     const useBox = useBoxCb ? useBoxCb.checked : false;
     const editingId = editIdInput.value;
     if (!name) { err.textContent = "اكتب اسمًا للعنصر"; err.hidden = false; return; }
-    if (!processed) { err.textContent = "ارفع صورة للعنصر"; err.hidden = false; return; }
+    if (!processed && !glbBase64) { err.textContent = "ارفع صورة أو نموذج 3D"; err.hidden = false; return; }
     if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
 
     const payload = {
       name, w, h: d, depth: h, category: cat, price, useBox,
-      color: processed.sideColor, sideColor: processed.sideColor,
-      image: processed.image,
-      hasAlpha: processed.hasAlpha || false,
-      _rawImage: rawImageData || processed.image,
+      color: processed ? processed.sideColor : "#888888",
+      sideColor: processed ? processed.sideColor : "#888888",
+      image: processed ? processed.image : "",
+      hasAlpha: (processed && processed.hasAlpha) || false,
+      _rawImage: rawImageData || (processed ? processed.image : ""),
     };
+    // Auto-generated side/top textures from photo edges
+    if (processed && processed.autoSide) payload.autoSide = processed.autoSide;
+    if (processed && processed.autoTop) payload.autoTop = processed.autoTop;
     if (processedSide) payload.imageSide = processedSide.image;
     if (processedTop) payload.imageTop = processedTop.image;
+    // GLB 3D model data
+    if (glbBase64) payload.glbData = glbBase64;
 
     if (editingId) {
       const ok = await window.CustomItems.update(editingId, payload);
