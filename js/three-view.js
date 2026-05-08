@@ -1,4 +1,4 @@
-﻿// 3D preview & editor (Three.js). Builds a scene from the current room +
+// 3D preview & editor (Three.js). Builds a scene from the current room +
 // placed furniture and exposes an editing API so app.js can drop/move/rotate
 // items directly in the 3D scene.
 //
@@ -331,7 +331,11 @@ function meshSignature(inst, item) {
     inst.overrideH || item.h,
     inst.overrideDepth || item.depth || "",
     item.color || "",
-    item.image ? "img" : "flat"
+    item.image ? "img" : "flat",
+    item.hasAlpha ? "alpha" : "",
+    item.billboard ? "bb" : "",
+    item.imageSide ? "side" : "",
+    item.imageTop ? "top" : "",
   ].join("|");
 }
 
@@ -1386,85 +1390,88 @@ function lighter(colorInt, amount) {
   return (r << 16) | (g << 8) | b;
 }
 
-// Same as lighter() but accepts/returns a hex string so callers that still use
-// string colors (e.g. the floor fallback) don't need to convert back and forth.
 function lighterHex(hexStr, amount) {
   const n = lighter(hexToInt(hexStr || "#888888"), amount);
   return "#" + n.toString(16).padStart(6, "0");
 }
 
-// ---------- Furniture mesh ----------
-function buildFurnitureMesh(inst, item) {
-  // Use instance-level dimension overrides if present
-  const w = inst.overrideW || item.w;
-  const d = inst.overrideH || item.h;                     // 2D "h" = top-down depth
-  const h = inst.overrideDepth || item.depth || defaultHeight(item);  // real 3D height
-  const geom = new THREE.BoxGeometry(w, h, d);
+// ---------- Furniture mesh (Enhancements B, C, D) ----------
+let _contactShadowTex = null;
+function getContactShadowTexture() {
+  if (_contactShadowTex) return _contactShadowTex;
+  const sz = 64;
+  const cvs = document.createElement("canvas");
+  cvs.width = sz; cvs.height = sz;
+  const c2 = cvs.getContext("2d");
+  const grad = c2.createRadialGradient(sz/2, sz/2, 0, sz/2, sz/2, sz/2);
+  grad.addColorStop(0, "rgba(0,0,0,0.35)");
+  grad.addColorStop(0.6, "rgba(0,0,0,0.12)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  c2.fillStyle = grad;
+  c2.fillRect(0, 0, sz, sz);
+  _contactShadowTex = new THREE.CanvasTexture(cvs);
+  return _contactShadowTex;
+}
 
+function buildFurnitureMesh(inst, item) {
+  const w = inst.overrideW || item.w;
+  const d = inst.overrideH || item.h;
+  const h = inst.overrideDepth || item.depth || defaultHeight(item);
   const isCustom = inst.groupId === "custom" && item.image;
+  const isBillboard = isCustom && (item.billboard || d < 5);
+  const hasAlpha = isCustom && item.hasAlpha;
+  const geom = isBillboard ? new THREE.PlaneGeometry(w, h) : new THREE.BoxGeometry(w, h, d);
   let materials;
   if (isCustom) {
     const sideColor = hexToInt(item.sideColor || item.color || "#888888");
-    const sideMat = new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.85 });
-    const topMat  = new THREE.MeshStandardMaterial({ color: lighter(sideColor, -0.15), roughness: 0.85 });
-    const tex = new THREE.TextureLoader().load(
-      item.image, undefined, undefined,
-      (err) => { console.warn("Texture load failed:", err); }
-    );
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const frontMat = new THREE.MeshStandardMaterial({
-      map: tex, roughness: 0.9,
-      emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.25,
-    });
-    // Clone texture for back face (flipped UVs don't matter for most product photos)
-    const backMat = new THREE.MeshStandardMaterial({
-      map: tex.clone(), roughness: 0.9,
-      emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.15,
-    });
-    // Box face order: [+x, -x, +y, -y, +z, -z] = right, left, top, bottom, front, back
-    // Front + back faces show the uploaded image; top gets a darker tint for shadow effect.
-    materials = [sideMat, sideMat.clone(), topMat, sideMat.clone(), frontMat, backMat];
+    const loader = new THREE.TextureLoader();
+    const loadTex = (url) => { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; };
+    const frontTex = loadTex(item.image);
+    const matOpts = { map: frontTex, roughness: 0.9, emissive: 0xffffff, emissiveMap: frontTex, emissiveIntensity: 0.25 };
+    if (hasAlpha) { matOpts.transparent = true; matOpts.alphaTest = 0.08; matOpts.side = THREE.DoubleSide; matOpts.depthWrite = true; }
+    const frontMat = new THREE.MeshStandardMaterial(matOpts);
+    if (isBillboard) {
+      frontMat.side = THREE.DoubleSide;
+      materials = frontMat;
+    } else {
+      const sideMat = new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.85, transparent: hasAlpha, opacity: hasAlpha ? 0.85 : 1 });
+      const topMat = new THREE.MeshStandardMaterial({ color: lighter(sideColor, -0.15), roughness: 0.85 });
+      let sideTexMat = sideMat;
+      if (item.imageSide) { const sideTex = loadTex(item.imageSide); sideTexMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.9, emissive: 0xffffff, emissiveMap: sideTex, emissiveIntensity: 0.2, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 }); }
+      let topTexMat = topMat;
+      if (item.imageTop) { const topTex = loadTex(item.imageTop); topTexMat = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.9 }); }
+      const backMat = frontMat.clone(); backMat.emissiveIntensity = 0.15;
+      materials = [sideTexMat, sideTexMat.clone(), topTexMat, sideMat.clone(), frontMat, backMat];
+    }
   } else {
-    const mat = new THREE.MeshStandardMaterial({
-      color: hexToInt(item.color || "#888888"),
-      roughness: 0.8,
-      transparent: (item.opacity ?? 1) < 1,
-      opacity: item.opacity ?? 1,
-    });
-    materials = mat;
+    materials = new THREE.MeshStandardMaterial({ color: hexToInt(item.color || "#888888"), roughness: 0.8, transparent: (item.opacity ?? 1) < 1, opacity: item.opacity ?? 1 });
   }
   const mesh = new THREE.Mesh(geom, materials);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.userData.groupId = inst.groupId;
-  mesh.userData.itemId  = inst.itemId;
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData.groupId = inst.groupId; mesh.userData.itemId = inst.itemId;
   mesh.userData.rotation = inst.rotation || 0;
   const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
   mesh.position.set(inst.x, h / 2 + lift, inst.y);
   mesh.rotation.y = -((inst.rotation || 0) * Math.PI) / 180;
+  if (isCustom) {
+    const shGeo = new THREE.PlaneGeometry(w * 0.9, d < 5 ? w * 0.3 : d * 0.9);
+    const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.25, depthWrite: false });
+    const shMesh = new THREE.Mesh(shGeo, shMat);
+    shMesh.rotation.x = -Math.PI / 2;
+    shMesh.position.y = -(h / 2) + 0.5 - lift;
+    mesh.add(shMesh);
+  }
   return mesh;
 }
 
-// Sensible default heights for built-in items (cm) when they don't define depth explicitly.
 function defaultHeight(item) {
-  const id = item.id;
-  const byId = {
-    sofa3: 85, sofa2: 85, sofa_l: 85, armchair: 85, coffee: 42,
-    tv_unit: 50, tv: 70, bookshelf: 200, dine_tbl: 75, dine_chair: 90, rug: 1, plant: 80,
-    bed_single: 50, bed_double: 50, bed_king: 50, nightstand: 55,
-    wardrobe: 220, dresser: 80, desk: 75, chair: 90,
-    fridge: 180, stove: 90, sink: 90, counter: 90, upper_cab: 70, microwave: 30,
-    dine_tbl2: 75, dine_chair2: 90,
-    bathtub: 55, toilet: 80, basin: 85, shower: 210, washer: 85, heater: 55,
-    floor_lamp: 160, ac_split: 25, curtain: 250, entry_rug: 1,
-  };
-  if (byId[id]) return byId[id];
-  const minSide = Math.min(item.w, item.h);
-  return minSide < 30 ? 40 : 70;
+  const byId = { sofa3: 85, sofa2: 85, sofa_l: 85, armchair: 85, coffee: 42, tv_unit: 50, tv: 70, bookshelf: 200, dine_tbl: 75, dine_chair: 90, rug: 1, plant: 80, bed_single: 50, bed_double: 50, bed_king: 50, nightstand: 55, wardrobe: 220, dresser: 80, desk: 75, chair: 90, fridge: 180, stove: 90, sink: 90, counter: 90, upper_cab: 70, microwave: 30, dine_tbl2: 75, dine_chair2: 90, bathtub: 55, toilet: 80, basin: 85, shower: 210, washer: 85, heater: 55, floor_lamp: 160, ac_split: 25, curtain: 250, entry_rug: 1 };
+  if (byId[item.id]) return byId[item.id];
+  return Math.min(item.w, item.h) < 30 ? 40 : 70;
 }
 
 // ============================================================
-// Apartment walkthrough — full 3D first-person tour of the flat
+// Apartment walkthrough
 // ============================================================
 function aptBounds(rooms) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

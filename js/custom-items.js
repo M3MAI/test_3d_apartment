@@ -219,13 +219,172 @@ function sampleEdgeColor(canvas) {
   return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
 }
 
+// ---------- Background removal (Enhancement A) ----------
+// Flood-fill from the 4 corners to detect and remove the background.
+// `tolerance` (0–100): how aggressively to match background pixels.
+// Returns a PNG data URL with transparent background.
+function removeBackground(canvas, tolerance = 30) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+
+  // Sample background color from the 4 corners (average of 3×3 blocks)
+  function sampleCorner(cx, cy) {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const px = Math.max(0, Math.min(w - 1, cx + dx));
+        const py = Math.max(0, Math.min(h - 1, cy + dy));
+        const i = (py * w + px) * 4;
+        r += d[i]; g += d[i+1]; b += d[i+2]; n++;
+      }
+    }
+    return [r/n, g/n, b/n];
+  }
+  const corners = [
+    sampleCorner(1, 1),
+    sampleCorner(w - 2, 1),
+    sampleCorner(1, h - 2),
+    sampleCorner(w - 2, h - 2),
+  ];
+  // Average all corners to get background color
+  const bgR = corners.reduce((s, c) => s + c[0], 0) / 4;
+  const bgG = corners.reduce((s, c) => s + c[1], 0) / 4;
+  const bgB = corners.reduce((s, c) => s + c[2], 0) / 4;
+
+  // Flood-fill from corners using a BFS queue
+  const visited = new Uint8Array(w * h);
+  const transparent = new Uint8Array(w * h); // 1 = mark as transparent
+  const tolSq = tolerance * tolerance * 3; // squared colour distance threshold
+  const queue = [];
+
+  function matches(idx) {
+    const i = idx * 4;
+    if (d[i+3] < 10) return true; // already transparent
+    const dr = d[i] - bgR, dg = d[i+1] - bgG, db = d[i+2] - bgB;
+    return (dr*dr + dg*dg + db*db) < tolSq;
+  }
+
+  // Seed from edges (not just 4 corners, but all border pixels)
+  for (let x = 0; x < w; x++) {
+    const topIdx = x;
+    const botIdx = (h-1) * w + x;
+    if (matches(topIdx)) { queue.push(topIdx); visited[topIdx] = 1; }
+    if (matches(botIdx)) { queue.push(botIdx); visited[botIdx] = 1; }
+  }
+  for (let y = 1; y < h - 1; y++) {
+    const leftIdx = y * w;
+    const rightIdx = y * w + w - 1;
+    if (matches(leftIdx)) { queue.push(leftIdx); visited[leftIdx] = 1; }
+    if (matches(rightIdx)) { queue.push(rightIdx); visited[rightIdx] = 1; }
+  }
+
+  // BFS flood fill
+  while (queue.length > 0) {
+    const idx = queue.shift();
+    transparent[idx] = 1;
+    const x = idx % w, y = (idx - x) / w;
+    const neighbors = [];
+    if (x > 0) neighbors.push(idx - 1);
+    if (x < w - 1) neighbors.push(idx + 1);
+    if (y > 0) neighbors.push(idx - w);
+    if (y < h - 1) neighbors.push(idx + w);
+    for (const n of neighbors) {
+      if (!visited[n] && matches(n)) {
+        visited[n] = 1;
+        queue.push(n);
+      }
+      visited[n] = 1; // mark visited even if not matching
+    }
+  }
+
+  // Morphological smoothing: erode 1px then dilate 1px to clean jagged edges
+  const eroded = new Uint8Array(transparent);
+  for (let y = 1; y < h-1; y++) {
+    for (let x = 1; x < w-1; x++) {
+      const i = y * w + x;
+      if (transparent[i] === 0) continue;
+      // Erode: if any 4-neighbor is opaque, mark this pixel opaque
+      if (transparent[i-1]===0 || transparent[i+1]===0 || transparent[i-w]===0 || transparent[i+w]===0) {
+        eroded[i] = 0;
+      }
+    }
+  }
+  const dilated = new Uint8Array(eroded);
+  for (let y = 1; y < h-1; y++) {
+    for (let x = 1; x < w-1; x++) {
+      const i = y * w + x;
+      if (eroded[i] === 1) continue;
+      // Dilate: if any 4-neighbor is transparent, mark this pixel transparent
+      if (eroded[i-1]===1 || eroded[i+1]===1 || eroded[i-w]===1 || eroded[i+w]===1) {
+        dilated[i] = 1;
+      }
+    }
+  }
+
+  // Apply transparency
+  for (let i = 0; i < w * h; i++) {
+    if (dilated[i]) {
+      d[i*4 + 3] = 0; // set alpha to 0
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  // Edge feathering: slight alpha blend on the boundary for anti-aliasing
+  const feathered = ctx.getImageData(0, 0, w, h);
+  const fd = feathered.data;
+  for (let y = 1; y < h-1; y++) {
+    for (let x = 1; x < w-1; x++) {
+      const i = (y * w + x) * 4;
+      if (fd[i+3] === 0) continue;
+      // Count transparent neighbors
+      let tCount = 0;
+      if (fd[((y-1)*w+x)*4+3] === 0) tCount++;
+      if (fd[((y+1)*w+x)*4+3] === 0) tCount++;
+      if (fd[(y*w+x-1)*4+3] === 0) tCount++;
+      if (fd[(y*w+x+1)*4+3] === 0) tCount++;
+      if (tCount > 0 && tCount < 4) {
+        fd[i+3] = Math.round(fd[i+3] * (1 - tCount * 0.2));
+      }
+    }
+  }
+  ctx.putImageData(feathered, 0, 0);
+
+  return canvas.toDataURL("image/png"); // PNG to preserve alpha
+}
+
 // Convert a File to a processed custom item payload (image + side color).
-async function processCustomImage(file) {
+async function processCustomImage(file, bgRemovalTolerance) {
   const img = await loadImageFromFile(file);
   const { dataUrl, canvas } = downscaleImage(img);
   const sideColor = sampleEdgeColor(canvas);
-  return { image: dataUrl, sideColor };
+  let finalImage = dataUrl;
+  // Apply background removal if tolerance > 0
+  if (bgRemovalTolerance != null && bgRemovalTolerance > 0) {
+    finalImage = removeBackground(canvas, bgRemovalTolerance);
+  }
+  return { image: finalImage, sideColor, hasAlpha: bgRemovalTolerance > 0 };
+}
+
+// Re-process an existing data URL with background removal (for preview/slider)
+async function reprocessWithBgRemoval(dataUrl, tolerance) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const sideColor = sampleEdgeColor(canvas);
+      const result = tolerance > 0 ? removeBackground(canvas, tolerance) : dataUrl;
+      resolve({ image: result, sideColor, hasAlpha: tolerance > 0 });
+    };
+    img.src = dataUrl;
+  });
 }
 
 window.CustomItems = CustomItems;
 window.processCustomImage = processCustomImage;
+window.reprocessWithBgRemoval = reprocessWithBgRemoval;

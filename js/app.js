@@ -924,6 +924,16 @@ function bindCustomModal() {
   const editIdInput = document.getElementById("ci-edit-id");
   let processed = null; // { image, sideColor }
 
+  const bgSection = document.getElementById("ci-bg-section");
+  const bgSlider  = document.getElementById("ci-bg-tolerance");
+  const bgVal     = document.getElementById("ci-bg-val");
+  const sideInput = document.getElementById("ci-image-side");
+  const topInput  = document.getElementById("ci-image-top");
+  const billboardCb = document.getElementById("ci-billboard");
+  let rawImageData = null;       // original image data URL before bg removal
+  let processedSide = null;      // { image, sideColor } for side photo
+  let processedTop = null;       // { image } for top photo
+
   function reset() {
     document.getElementById("ci-name").value = "";
     document.getElementById("ci-w").value = 60;
@@ -932,12 +942,19 @@ function bindCustomModal() {
     document.getElementById("ci-cat").value = "common";
     document.getElementById("ci-price").value = "";
     imgInput.value = "";
+    if (sideInput) sideInput.value = "";
+    if (topInput) topInput.value = "";
+    if (billboardCb) billboardCb.checked = false;
     preview.innerHTML = `<span class="ph">لم يتم اختيار صورة</span>`;
     err.hidden = true; err.textContent = "";
     processed = null;
+    rawImageData = null;
+    processedSide = null;
+    processedTop = null;
     editIdInput.value = "";
     title.textContent = "إضافة عنصر مخصص";
     saveBtn.textContent = "إضافة للكتالوج";
+    if (bgSection) { bgSection.hidden = true; bgSlider.value = 30; bgVal.textContent = "30"; }
   }
   function open() { reset(); modal.hidden = false; document.getElementById("ci-name").focus(); }
   function openForEdit(item) {
@@ -951,9 +968,14 @@ function bindCustomModal() {
     document.getElementById("ci-h").value = item.depth || 80;
     document.getElementById("ci-cat").value = item.category || "common";
     document.getElementById("ci-price").value = item.price || "";
+    if (billboardCb) billboardCb.checked = !!item.billboard;
     if (item.image) preview.innerHTML = `<img src="${esc(item.image)}" alt="معاينة" />`;
     // Keep existing image unless a new file is chosen.
     processed = item.image ? { image: item.image, sideColor: item.sideColor || item.color } : null;
+    rawImageData = item._rawImage || item.image || null;
+    if (item.imageSide) processedSide = { image: item.imageSide };
+    if (item.imageTop) processedTop = { image: item.imageTop };
+    if (bgSection && item.image) { bgSection.hidden = false; }
     modal.hidden = false;
   }
   function close() { modal.hidden = true; }
@@ -965,12 +987,25 @@ function bindCustomModal() {
   modal.addEventListener("click", e => { if (e.target === modal) close(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !modal.hidden) close(); });
 
+  // Main front image upload
   imgInput.addEventListener("change", async () => {
     const file = imgInput.files[0];
     if (!file) return;
     try {
-      processed = await window.processCustomImage(file);
+      const tol = parseInt(bgSlider.value, 10) || 0;
+      processed = await window.processCustomImage(file, tol);
+      rawImageData = processed.image; // keep raw for re-processing
+      // Re-read raw (without bg removal) for slider re-processing
+      const rawResult = await window.processCustomImage(file, 0);
+      rawImageData = rawResult.image;
+      // Now apply bg removal
+      if (tol > 0) {
+        processed = await window.reprocessWithBgRemoval(rawImageData, tol);
+      } else {
+        processed = rawResult;
+      }
       preview.innerHTML = `<img src="${esc(processed.image)}" alt="معاينة" />`;
+      if (bgSection) bgSection.hidden = false;
       err.hidden = true;
     } catch {
       processed = null;
@@ -978,6 +1013,45 @@ function bindCustomModal() {
       err.hidden = false;
     }
   });
+
+  // Background removal slider — live preview
+  if (bgSlider) {
+    let _bgDebounce = null;
+    bgSlider.addEventListener("input", () => {
+      bgVal.textContent = bgSlider.value;
+      if (!rawImageData) return;
+      clearTimeout(_bgDebounce);
+      _bgDebounce = setTimeout(async () => {
+        const tol = parseInt(bgSlider.value, 10);
+        const result = await window.reprocessWithBgRemoval(rawImageData, tol);
+        processed = result;
+        preview.innerHTML = `<img src="${esc(result.image)}" alt="معاينة" />`;
+      }, 200);
+    });
+  }
+
+  // Side photo (Enhancement B)
+  if (sideInput) {
+    sideInput.addEventListener("change", async () => {
+      const file = sideInput.files[0];
+      if (!file) return;
+      try {
+        const tol = parseInt(bgSlider.value, 10) || 0;
+        processedSide = await window.processCustomImage(file, tol);
+      } catch { processedSide = null; }
+    });
+  }
+
+  // Top photo (Enhancement B)
+  if (topInput) {
+    topInput.addEventListener("change", async () => {
+      const file = topInput.files[0];
+      if (!file) return;
+      try {
+        processedTop = await window.processCustomImage(file, 0); // no bg removal for top
+      } catch { processedTop = null; }
+    });
+  }
 
   saveBtn.addEventListener("click", async () => {
     const name = document.getElementById("ci-name").value.trim();
@@ -987,16 +1061,24 @@ function bindCustomModal() {
     const cat = document.getElementById("ci-cat").value;
     const priceRaw = document.getElementById("ci-price").value.trim();
     const price = priceRaw === "" ? 0 : Math.max(0, parseInt(priceRaw, 10) || 0);
+    const billboard = billboardCb ? billboardCb.checked : false;
     const editingId = editIdInput.value;
     if (!name) { err.textContent = "اكتب اسمًا للعنصر"; err.hidden = false; return; }
     if (!processed) { err.textContent = "ارفع صورة للعنصر"; err.hidden = false; return; }
     if (!(w > 0 && d > 0 && h > 0)) { err.textContent = "الأبعاد غير صالحة"; err.hidden = false; return; }
 
+    const payload = {
+      name, w, h: d, depth: h, category: cat, price, billboard,
+      color: processed.sideColor, sideColor: processed.sideColor,
+      image: processed.image,
+      hasAlpha: processed.hasAlpha || false,
+      _rawImage: rawImageData || processed.image,
+    };
+    if (processedSide) payload.imageSide = processedSide.image;
+    if (processedTop) payload.imageTop = processedTop.image;
+
     if (editingId) {
-      const ok = await window.CustomItems.update(editingId, {
-        name, w, h: d, depth: h, category: cat, price,
-        color: processed.sideColor, sideColor: processed.sideColor, image: processed.image,
-      });
+      const ok = await window.CustomItems.update(editingId, payload);
       if (ok) {
         renderCatalog();
         drawRoom();
@@ -1006,14 +1088,7 @@ function bindCustomModal() {
       }
     } else {
       const id = "c_" + Math.random().toString(36).slice(2, 9);
-      const item = {
-        id, name, icon: "📷",
-        w, h: d, depth: h,
-        color: processed.sideColor, sideColor: processed.sideColor,
-        image: processed.image,
-        category: cat,
-        price,
-      };
+      const item = { id, icon: "📷", ...payload };
       if (await window.CustomItems.add(item)) {
         renderCatalog();
         toast("تمت الإضافة للكتالوج");
