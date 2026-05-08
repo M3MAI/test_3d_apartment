@@ -345,7 +345,11 @@ function applyInstTransform(mesh, inst, item) {
   const h = inst.overrideDepth || item.depth || defaultHeight(item);
   const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
   mesh.position.set(inst.x, h / 2 + lift, inst.y);
-  mesh.rotation.y = -((inst.rotation || 0) * Math.PI) / 180;
+  mesh.rotation.set(
+    -((inst.rotationX || 0) * Math.PI) / 180,
+    -((inst.rotation  || 0) * Math.PI) / 180,
+    -((inst.rotationZ || 0) * Math.PI) / 180
+  );
   mesh.userData.rotation = inst.rotation || 0;
 }
 
@@ -1427,7 +1431,7 @@ function buildFurnitureMesh(inst, item) {
     const loader = new THREE.TextureLoader();
     const loadTex = (url) => { const t = loader.load(url); t.colorSpace = THREE.SRGBColorSpace; return t; };
     const frontTex = loadTex(item.image);
-    const matOpts = { map: frontTex, roughness: 0.9, emissive: 0xffffff, emissiveMap: frontTex, emissiveIntensity: 0.25 };
+    const matOpts = { map: frontTex, roughness: 0.7, metalness: 0.0 };
     if (hasAlpha) { matOpts.transparent = true; matOpts.alphaTest = 0.08; matOpts.side = THREE.DoubleSide; matOpts.depthWrite = true; }
     const frontMat = new THREE.MeshStandardMaterial(matOpts);
     if (isBillboard) {
@@ -1437,10 +1441,10 @@ function buildFurnitureMesh(inst, item) {
       const sideMat = new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.85, transparent: hasAlpha, opacity: hasAlpha ? 0.85 : 1 });
       const topMat = new THREE.MeshStandardMaterial({ color: lighter(sideColor, -0.15), roughness: 0.85 });
       let sideTexMat = sideMat;
-      if (item.imageSide) { const sideTex = loadTex(item.imageSide); sideTexMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.9, emissive: 0xffffff, emissiveMap: sideTex, emissiveIntensity: 0.2, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 }); }
+      if (item.imageSide) { const sideTex = loadTex(item.imageSide); sideTexMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.7, metalness: 0.0, transparent: hasAlpha, alphaTest: hasAlpha ? 0.08 : 0 }); }
       let topTexMat = topMat;
       if (item.imageTop) { const topTex = loadTex(item.imageTop); topTexMat = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.9 }); }
-      const backMat = frontMat.clone(); backMat.emissiveIntensity = 0.15;
+      const backMat = frontMat.clone();
       materials = [sideTexMat, sideTexMat.clone(), topTexMat, sideMat.clone(), frontMat, backMat];
     }
   } else {
@@ -1452,7 +1456,11 @@ function buildFurnitureMesh(inst, item) {
   mesh.userData.rotation = inst.rotation || 0;
   const lift = Number.isFinite(inst.liftedZ) ? inst.liftedZ : 0;
   mesh.position.set(inst.x, h / 2 + lift, inst.y);
-  mesh.rotation.y = -((inst.rotation || 0) * Math.PI) / 180;
+  mesh.rotation.set(
+    -((inst.rotationX || 0) * Math.PI) / 180,
+    -((inst.rotation  || 0) * Math.PI) / 180,
+    -((inst.rotationZ || 0) * Math.PI) / 180
+  );
   if (isCustom) {
     const shGeo = new THREE.PlaneGeometry(w * 0.9, d < 5 ? w * 0.3 : d * 0.9);
     const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.25, depthWrite: false });

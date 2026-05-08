@@ -2454,6 +2454,14 @@ function renderSelection() {
       <input class="rot-input" type="number" min="0" max="359" step="15" value="${inst.rotation || 0}" aria-label="زاوية الدوران" />
     </div>
     <div class="sel-row">
+      <span>إمالة أمامية X°</span>
+      <input class="rot-x-input" type="number" min="-180" max="180" step="5" value="${inst.rotationX || 0}" aria-label="إمالة أمامية" />
+    </div>
+    <div class="sel-row">
+      <span>إمالة جانبية Z°</span>
+      <input class="rot-z-input" type="number" min="-180" max="180" step="5" value="${inst.rotationZ || 0}" aria-label="إمالة جانبية" />
+    </div>
+    <div class="sel-row">
       <span>الارتفاع عن الأرض <small>سم</small></span>
       <input class="lift-input" type="number" min="0" max="280" step="5" value="${Number(inst.liftedZ) || 0}" aria-label="الارتفاع عن الأرض" title="ارفع القطعة عن الأرض (مثال: لوحة على الحائط، رفّ معلَّق)" />
     </div>
@@ -2520,6 +2528,31 @@ function renderSelection() {
       if (!Number.isFinite(v)) return;
       pushHistory();
       inst.liftedZ = Math.max(0, Math.min(280, v));
+      saveLayouts();
+      drawRoom();
+      renderSelection();
+    });
+  }
+  // 3D rotation: pitch (X) and roll (Z) inputs
+  const rotXInput = panel.querySelector(".rot-x-input");
+  if (rotXInput) {
+    rotXInput.addEventListener("change", () => {
+      const v = parseInt(rotXInput.value, 10);
+      if (!Number.isFinite(v)) return;
+      pushHistory();
+      inst.rotationX = ((v % 360) + 360) % 360;
+      saveLayouts();
+      drawRoom();
+      renderSelection();
+    });
+  }
+  const rotZInput = panel.querySelector(".rot-z-input");
+  if (rotZInput) {
+    rotZInput.addEventListener("change", () => {
+      const v = parseInt(rotZInput.value, 10);
+      if (!Number.isFinite(v)) return;
+      pushHistory();
+      inst.rotationZ = ((v % 360) + 360) % 360;
       saveLayouts();
       drawRoom();
       renderSelection();
