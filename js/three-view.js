@@ -30,11 +30,12 @@ function wallH(room) {
 }
 
 // ---------- Renderer profile (mobile/tablet performance) ----------
-// 3D on mobile is bottlenecked by fragment work: a 3× DPR phone with antialias
-// and shadow maps was rendering ~9× the desktop pixel load and 2 extra shadow
-// passes per frame. This helper produces a single profile shared by `show()`
-// (single-room orbit) and `showApartment()` (walkthrough), with a localStorage
-// override key `apt_3d_quality` ("low" | "high") so users can force either tier.
+// Conservative profile: keeps every visual feature (antialias, shadows, env
+// map) and only tunes two things — the device pixel ratio cap, and the size
+// of the shadow map. That avoids the mobile crash modes we hit when toggling
+// `powerPreference` or disabling features the rest of the scene assumes are
+// on. A localStorage override key `apt_3d_quality` ("low" | "high") lets a
+// user force either tier; otherwise we auto-detect mobile-like environments.
 function isMobileLike() {
   const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
   const small  = Math.min(window.innerWidth || 9999, window.innerHeight || 9999) < 900;
@@ -46,15 +47,17 @@ function getRendererProfile() {
   let forced = null;
   try { forced = localStorage.getItem("apt_3d_quality"); } catch (_) {}
   const low = forced ? (forced === "low") : isMobileLike();
-  const dprCap = low ? 1.5 : 2;
   return {
     low,
-    pixelRatio: Math.min(window.devicePixelRatio || 1, dprCap),
-    antialias: !low,
-    shadows: !low,
+    // Cap DPR at 2 universally. Stops phones with DPR=3 from rendering at 9×
+    // canvas pixel count, without visibly softening the picture (DPR=2 is
+    // already "retina"). Desktop is unchanged because devicePixelRatio is
+    // usually ≤ 2 already.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    // Smaller shadow maps on mobile keep shadows on (so the scene doesn't
+    // look flat) but quarter the depth-pass cost.
     shadowMapSize: low ? 512 : 1024,         // single-room directional light
     aptShadowMapSize: low ? 1024 : 2048,     // apartment sun
-    envMap: !low,                            // PMREM RoomEnvironment
   };
 }
 // Expose a console-friendly toggle: AptThreeView.setQuality("low"|"high"|"auto").
@@ -143,40 +146,30 @@ function show(container, opts) {
     8000
   );
   const profile = getRendererProfile();
-  const renderer = new THREE.WebGLRenderer({
-    antialias: profile.antialias,
-    preserveDrawingBuffer: true,
-    powerPreference: "high-performance",
-  });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(profile.pixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
-  renderer.shadowMap.enabled = profile.shadows;
+  renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
 
-  // Environment map for PBR/GLB materials (makes them show true colors).
-  // Skipped on low-end profiles to save the PMREM prefilter cost at scene
-  // startup (was 60-150 ms on phones); PBR materials fall back to ambient.
-  if (profile.envMap) {
-    const pmremGen = new THREE.PMREMGenerator(renderer);
-    pmremGen.compileEquirectangularShader();
-    scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
-    pmremGen.dispose();
-  }
+  // Environment map for PBR/GLB materials (makes them show true colors)
+  const pmremGen = new THREE.PMREMGenerator(renderer);
+  pmremGen.compileEquirectangularShader();
+  scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
+  pmremGen.dispose();
 
   // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, profile.envMap ? 0.8 : 1.0));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
   const key = new THREE.DirectionalLight(0xffffff, 0.85);
   key.position.set(room.width * 0.6, WALL_HEIGHT * 2, room.depth * 0.4);
-  key.castShadow = profile.shadows;
-  if (profile.shadows) {
-    key.shadow.mapSize.set(profile.shadowMapSize, profile.shadowMapSize);
-    key.shadow.camera.left   = -room.width;
-    key.shadow.camera.right  =  room.width;
-    key.shadow.camera.top    =  room.depth;
-    key.shadow.camera.bottom = -room.depth;
-  }
+  key.castShadow = true;
+  key.shadow.mapSize.set(profile.shadowMapSize, profile.shadowMapSize);
+  key.shadow.camera.left   = -room.width;
+  key.shadow.camera.right  =  room.width;
+  key.shadow.camera.top    =  room.depth;
+  key.shadow.camera.bottom = -room.depth;
   scene.add(key);
   const fill = new THREE.DirectionalLight(0xffffff, 0.25);
   fill.position.set(-room.width * 0.3, WALL_HEIGHT * 1.5, -room.depth * 0.3);
@@ -204,7 +197,7 @@ function show(container, opts) {
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(room.width / 2, 0, room.depth / 2);
   }
-  floor.receiveShadow = profile.shadows;
+  floor.receiveShadow = true;
   floor.name = "room-floor";
   scene.add(floor);
 
@@ -1647,39 +1640,31 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
     1, 8000
   );
   const profile = getRendererProfile();
-  const renderer = new THREE.WebGLRenderer({
-    antialias: profile.antialias,
-    preserveDrawingBuffer: true,
-    powerPreference: "high-performance",
-  });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(profile.pixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
-  renderer.shadowMap.enabled = profile.shadows;
+  renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
 
-  // Environment map for PBR/GLB materials — skip on low-end to save startup.
-  if (profile.envMap) {
-    const pmremGen = new THREE.PMREMGenerator(renderer);
-    pmremGen.compileEquirectangularShader();
-    scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
-    pmremGen.dispose();
-  }
+  // Environment map for PBR/GLB materials
+  const pmremGen = new THREE.PMREMGenerator(renderer);
+  pmremGen.compileEquirectangularShader();
+  scene.environment = pmremGen.fromScene(new RoomEnvironment()).texture;
+  pmremGen.dispose();
 
   // Lights
-  const ambient = new THREE.AmbientLight(0xffffff, profile.envMap ? 0.7 : 1.0);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.7);
   scene.add(ambient);
   const sun = new THREE.DirectionalLight(0xffffff, 1.0);
   sun.position.set(bounds.w * 0.6, WALL_HEIGHT * 4, bounds.h * 0.4);
-  sun.castShadow = profile.shadows;
-  if (profile.shadows) {
-    sun.shadow.mapSize.set(profile.aptShadowMapSize, profile.aptShadowMapSize);
-    sun.shadow.camera.left = -bounds.w;
-    sun.shadow.camera.right = bounds.w;
-    sun.shadow.camera.top = bounds.h;
-    sun.shadow.camera.bottom = -bounds.h;
-  }
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(profile.aptShadowMapSize, profile.aptShadowMapSize);
+  sun.shadow.camera.left = -bounds.w;
+  sun.shadow.camera.right = bounds.w;
+  sun.shadow.camera.top = bounds.h;
+  sun.shadow.camera.bottom = -bounds.h;
   scene.add(sun);
 
   // Unified floor spanning whole apartment (light neutral)
@@ -1688,7 +1673,7 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(bounds.w / 2, 0, bounds.h / 2);
-  floor.receiveShadow = profile.shadows;
+  floor.receiveShadow = true;
   scene.add(floor);
 
   // Build each room with an offset matching its plan coords. Items live in a
