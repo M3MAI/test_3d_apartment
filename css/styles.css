@@ -1341,3 +1341,37 @@ kbd {
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 .plan-dim-tip[hidden] { display: none; }
+
+/* ==========================================================================
+   Responsive: <480px (small phones)
+   ========================================================================== */
+@media (max-width: 480px) {
+  main { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; inset: 0; z-index: 999;
+    width: 100%; max-height: none;
+    border-inline-end: none;
+    border-bottom: none;
+  }
+  .sidebar.hidden { display: none; }
+  .topbar { padding: 6px 10px; }
+  .topbar .brand h1 { font-size: 14px; }
+  .topbar .brand .subtitle { display: none; }
+  .top-actions { gap: 3px; }
+  .top-actions .btn { padding: 4px 8px; font-size: 11px; }
+  .top-actions .divider { display: none; }
+  #furniture-catalog { grid-template-columns: 1fr; }
+  .cat-group { grid-column: span 1; }
+  .modal { max-width: 100%; margin: 0 4px; }
+  .modal-head { padding: 10px 12px; }
+  .modal-body { padding: 10px 12px; }
+  .modal-foot { padding: 8px 12px; }
+  #custom-modal .fields-row { grid-template-columns: 1fr; }
+  #room-modal .fields-row { grid-template-columns: 1fr; }
+  .room-container { min-height: 200px; }
+  .view-controls { flex-wrap: wrap; }
+  .wall-color-grid { grid-template-columns: 1fr; }
+  .walk-room-grid { grid-template-columns: repeat(2, 1fr); }
+  .onboarding .ob-card { padding: 16px; }
+  .cost-table { font-size: 11px; }
+}

@@ -49,15 +49,14 @@ function getRendererProfile() {
   const low = forced ? (forced === "low") : isMobileLike();
   return {
     low,
-    // Cap DPR at 2 universally. Stops phones with DPR=3 from rendering at 9×
-    // canvas pixel count, without visibly softening the picture (DPR=2 is
-    // already "retina"). Desktop is unchanged because devicePixelRatio is
-    // usually ≤ 2 already.
-    pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    // Cap DPR at 1.5 on mobile / 2 on desktop. Stops phones with DPR=3 from
+    // rendering at 9× canvas pixel count, without visibly softening the picture.
+    // Desktop is unchanged because devicePixelRatio is usually ≤ 2 already.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.5 : 2),
     // Smaller shadow maps on mobile keep shadows on (so the scene doesn't
     // look flat) but quarter the depth-pass cost.
-    shadowMapSize: low ? 512 : 1024,         // single-room directional light
-    aptShadowMapSize: low ? 1024 : 2048,     // apartment sun
+    shadowMapSize: low ? 256 : 1024,         // single-room directional light
+    aptShadowMapSize: low ? 512 : 2048,      // apartment sun
   };
 }
 // Expose a console-friendly toggle: AptThreeView.setQuality("low"|"high"|"auto").
@@ -73,6 +72,7 @@ function setQuality(level) {
 let ctx = null;                // per-show rendering context  (room-level 3D)
 let aptCtx = null;             // per-show apartment walkthrough context
 const _collRay = new THREE.Raycaster(); // reusable raycaster for wall collision (#1)
+const _glbCache = new Map();           // GLB model cache — parses once, clones on reuse
 
 // ---------- Disposal ----------
 function disposeObj(obj) {
@@ -1503,36 +1503,43 @@ function buildFurnitureMesh(inst, item) {
     container.userData.itemId = inst.itemId;
     container.userData.rotation = inst.rotation || 0;
     container.userData._isGLB = true;
+    container.userData._glbData = item.glbData;
     container.position.set(inst.x, lift, inst.y);
     container.rotation.set(
       -((inst.rotationX || 0) * Math.PI) / 180,
       -((inst.rotation  || 0) * Math.PI) / 180,
       -((inst.rotationZ || 0) * Math.PI) / 180
     );
-    // Load GLB asynchronously
-    const loader = new GLTFLoader();
-    const binary = Uint8Array.from(atob(item.glbData), c => c.charCodeAt(0));
-    loader.parse(binary.buffer, "", (gltf) => {
-      const model = gltf.scene;
-      // Compute bounding box to scale to user dimensions
+    function scaleAndPlaceModel(model) {
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const scaleX = w / (size.x || 1);
       const scaleY = h / (size.y || 1);
       const scaleZ = d / (size.z || 1);
       model.scale.set(scaleX, scaleY, scaleZ);
-      // Center the model and place on the ground
       const newBox = new THREE.Box3().setFromObject(model);
       const center = newBox.getCenter(new THREE.Vector3());
       const minY = newBox.min.y;
       model.position.sub(center);
-      model.position.y -= minY; // ground the model
+      model.position.y -= minY;
       model.traverse(child => {
         if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
       });
       container.add(model);
-    }, (err) => { console.warn("GLB parse error:", err); });
-    // Add contact shadow
+    }
+    const cached = _glbCache.get(item.glbData);
+    if (cached) {
+      scaleAndPlaceModel(cached.clone());
+    } else {
+      const loader = new GLTFLoader();
+      const binary = Uint8Array.from(atob(item.glbData), c => c.charCodeAt(0));
+      loader.parse(binary.buffer, "", (gltf) => {
+        _glbCache.set(item.glbData, gltf.scene);
+        scaleAndPlaceModel(gltf.scene);
+      }, (err) => {
+        if (typeof window.toast === "function") window.toast("فشل تحميل نموذج 3D", "err");
+      });
+    }
     const shGeo = new THREE.PlaneGeometry(w * 0.9, d * 0.9);
     const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.3, depthWrite: false });
     const shMesh = new THREE.Mesh(shGeo, shMat);

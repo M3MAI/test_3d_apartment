@@ -1058,22 +1058,44 @@ function bindCustomModal() {
     });
   }
 
-  // GLB 3D model file handler
+  // GLB 3D model file handler — with size limit and memory-efficient base64
   if (glbInput) {
     glbInput.addEventListener("change", () => {
       const file = glbInput.files[0];
       if (!file) { glbBase64 = null; return; }
+      const MAX_GLB_MB = 10;
+      if (file.size > MAX_GLB_MB * 1024 * 1024) {
+        err.textContent = `حجم الملف كبير جداً (${(file.size / 1024 / 1024).toFixed(1)} MB). الحد الأقصى هو ${MAX_GLB_MB} MB.`;
+        err.hidden = false;
+        glbInput.value = "";
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
-        // Convert ArrayBuffer to base64
-        const bytes = new Uint8Array(reader.result);
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-        glbBase64 = btoa(binary);
-        // Auto-set a placeholder processed if no image was uploaded
-        if (!processed) {
-          processed = { image: "", sideColor: "#888888", hasAlpha: false };
+        try {
+          const blob = new Blob([reader.result], { type: "application/octet-stream" });
+          const urlReader = new FileReader();
+          urlReader.onload = () => {
+            glbBase64 = urlReader.result.split(",")[1];
+            err.hidden = true;
+            if (!processed) {
+              processed = { image: "", sideColor: "#888888", hasAlpha: false };
+            }
+          };
+          urlReader.onerror = () => {
+            err.textContent = "تعذّر معالجة ملف 3D — حاول مرة أخرى";
+            err.hidden = false;
+          };
+          urlReader.readAsDataURL(blob);
+        } catch (e) {
+          err.textContent = "تعذّر معالجة ملف 3D — الملف كبير جداً أو تالف";
+          err.hidden = false;
+          glbBase64 = null;
         }
+      };
+      reader.onerror = () => {
+        err.textContent = "تعذّر قراءة ملف 3D";
+        err.hidden = false;
       };
       reader.readAsArrayBuffer(file);
     });
