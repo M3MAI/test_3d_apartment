@@ -1276,14 +1276,31 @@ function bindTopbar() {
 
 function exportJSON() {
   // Export COMPLETE project: layouts + custom items + room overrides + prices
+  // + wall photos. v3 adds `wallPhotos` so per-wall photo textures stored in
+  // IndexedDB survive a round-trip across devices/browsers (v2 silently lost
+  // them, since WallStorage is not persisted in localStorage).
+  const wallPhotos = {};
+  if (window.WallStorage) {
+    const def = window.WallStorage.getDefault();
+    if (def && def.textures && Object.keys(def.textures).length > 0) {
+      wallPhotos.__default__ = def;
+    }
+    ROOMS.forEach(r => {
+      const rec = window.WallStorage.getAllForRoom(r.id);
+      if (rec && rec.textures && Object.keys(rec.textures).length > 0) {
+        wallPhotos[r.id] = rec;
+      }
+    });
+  }
   const project = {
     _format: "apt-designer-project",
-    _version: 2,
+    _version: 3,
     _date: new Date().toISOString(),
     layouts: state.layouts,
     overrides: loadRoomOverrides(),
     prices: state.prices,
     customItems: window.CustomItems.all(),
+    wallPhotos,
   };
   const json = JSON.stringify(project);
   const blob = new Blob([json], { type: "application/json" });
@@ -1331,6 +1348,22 @@ function importJSON(e) {
           for (const item of data.customItems) {
             await window.CustomItems.add(item);
           }
+        }
+
+        // Restore wall photos (v3+). Each entry is { textures, settings };
+        // `__default__` is the app-level fallback wallpaper.
+        if (data.wallPhotos && typeof data.wallPhotos === "object" && window.WallStorage) {
+          for (const [roomId, rec] of Object.entries(data.wallPhotos)) {
+            if (!rec || typeof rec !== "object") continue;
+            const textures = rec.textures || {};
+            const settings = rec.settings || {};
+            if (roomId === "__default__") {
+              await window.WallStorage.setDefault(textures, settings);
+            } else {
+              await window.WallStorage.setRoom(roomId, textures, settings);
+            }
+          }
+          applyWallStorageToRooms();
         }
       } else {
         // Legacy format: just layouts object
