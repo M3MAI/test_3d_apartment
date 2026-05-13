@@ -688,6 +688,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindViewModeToggle();
   bindGlobalKeys();
   bindCatalogTouchDrag();
+  bindMobileNav();
   bindSunSlider();
   bindMeasure();
   bindShareExportButtons();
@@ -1176,6 +1177,86 @@ function bindViewModeToggle() {
   document.getElementById("btn-mode-3d").addEventListener("click", () => setViewMode("3d"));
   document.getElementById("btn-mode-walk").addEventListener("click", () => setViewMode("walk"));
   bindWallVisibilityToggle();
+}
+
+// ---------- Mobile navigation (sidebar drawer + bottom nav) ----------
+function isMobileViewport() { return window.innerWidth <= 760; }
+
+function openMobileSidebar() {
+  const sidebar = document.getElementById("sidebar-panel");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar) return;
+  sidebar.classList.add("open");
+  if (backdrop) { backdrop.hidden = false; backdrop.classList.add("visible"); }
+}
+function closeMobileSidebar() {
+  const sidebar = document.getElementById("sidebar-panel");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar) return;
+  sidebar.classList.remove("open");
+  if (backdrop) { backdrop.classList.remove("visible"); setTimeout(() => { backdrop.hidden = true; }, 300); }
+}
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById("sidebar-panel");
+  if (sidebar && sidebar.classList.contains("open")) closeMobileSidebar();
+  else openMobileSidebar();
+}
+
+function bindMobileNav() {
+  // Hamburger toggle
+  const menuBtn = document.getElementById("btn-mobile-menu");
+  if (menuBtn) menuBtn.addEventListener("click", toggleMobileSidebar);
+
+  // Backdrop click closes sidebar
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (backdrop) backdrop.addEventListener("click", closeMobileSidebar);
+
+  // Bottom nav buttons
+  const roomsBtn = document.getElementById("mnav-rooms");
+  const catalogBtn = document.getElementById("mnav-catalog");
+  const viewBtn = document.getElementById("mnav-view");
+  const saveBtn = document.getElementById("mnav-save");
+  const moreBtn = document.getElementById("mnav-more");
+
+  if (roomsBtn) roomsBtn.addEventListener("click", () => {
+    openMobileSidebar();
+    // Scroll sidebar to room picker
+    const rp = document.querySelector(".room-picker");
+    if (rp) rp.scrollIntoView({ behavior: "smooth" });
+  });
+  if (catalogBtn) catalogBtn.addEventListener("click", () => {
+    openMobileSidebar();
+    // Scroll sidebar to catalog
+    const fc = document.getElementById("furniture-catalog");
+    if (fc) fc.scrollIntoView({ behavior: "smooth" });
+  });
+  if (viewBtn) viewBtn.addEventListener("click", () => {
+    // Cycle through view modes: 2d → 3d → walk → 2d
+    const modes = ["2d", "3d", "walk"];
+    const idx = modes.indexOf(state.viewMode);
+    const next = modes[(idx + 1) % modes.length];
+    setViewMode(next);
+    // Update button label
+    const label = viewBtn.querySelector(".mnav-label");
+    if (label) label.textContent = next.toUpperCase();
+  });
+  if (saveBtn) saveBtn.addEventListener("click", () => {
+    // Trigger the main save button
+    const mainSave = document.getElementById("btn-save");
+    if (mainSave) mainSave.click();
+  });
+  if (moreBtn) moreBtn.addEventListener("click", () => {
+    // Show the secondary actions that are hidden on mobile
+    // Open sidebar and scroll to bottom or show a mini action sheet
+    openMobileSidebar();
+  });
+
+  // Auto-close sidebar when a room is selected (on mobile)
+  document.getElementById("room-list")?.addEventListener("click", (e) => {
+    if (isMobileViewport() && e.target.closest("li")) {
+      setTimeout(closeMobileSidebar, 150);
+    }
+  });
 }
 
 // ---------- 3D wall-visibility toggle ----------

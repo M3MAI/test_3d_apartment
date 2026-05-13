@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #f4f6fb;
   --panel: #ffffff;
   --panel-2: #f8faff;
@@ -1465,21 +1465,7 @@ kbd {
 .plan-dim-tip[hidden] { display: none; }
 
 /* ==========================================================================
-   Responsive: <480px (small phones)
-   ========================================================================== */
-@media (max-width: 480px) {
-  main { grid-template-columns: 1fr; }
-  .sidebar {
-    position: fixed; inset: 0; z-index: 999;
-    width: 100%; max-height: none;
-    border-inline-end: none;
-    border-bottom: none;
-  }
-  .sidebar.hidden { display: none; }
-.plan-dim-tip[hidden] { display: none; }
-
-/* ==========================================================================
-   Responsive: <480px (small phones — additional tweaks)
+   Responsive: <480px (small phones - additional tweaks)
    Sidebar drawer is already handled by the 760px breakpoint above.
    ========================================================================== */
 @media (max-width: 480px) {
@@ -1498,6 +1484,5 @@ kbd {
   .walk-room-grid { grid-template-columns: repeat(2, 1fr); }
   .onboarding .ob-card { padding: 16px; }
   .cost-table { font-size: 11px; }
-  /* Bottom nav: account for safe area on notched phones */
   .mobile-bottomnav { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
 }
