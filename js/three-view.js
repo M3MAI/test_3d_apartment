@@ -49,14 +49,17 @@ function getRendererProfile() {
   const low = forced ? (forced === "low") : isMobileLike();
   return {
     low,
-    // Cap DPR at 1.5 on mobile / 2 on desktop. Stops phones with DPR=3 from
-    // rendering at 9× canvas pixel count, without visibly softening the picture.
-    // Desktop is unchanged because devicePixelRatio is usually ≤ 2 already.
-    pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.5 : 2),
+    // Cap DPR: 1.0 on mobile (huge perf win), 2 on desktop.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.0 : 2),
     // Smaller shadow maps on mobile keep shadows on (so the scene doesn't
     // look flat) but quarter the depth-pass cost.
     shadowMapSize: low ? 256 : 1024,         // single-room directional light
     aptShadowMapSize: low ? 512 : 2048,      // apartment sun
+    // On mobile, disable shadows entirely on GLB model meshes — they are
+    // the single largest GPU cost (each shadow-casting mesh = extra draw call).
+    glbShadows: !low,
+    // On mobile, downgrade GLB PBR materials to cheaper Lambert shading.
+    simplifyGlbMaterials: low,
   };
 }
 // Expose a console-friendly toggle: AptThreeView.setQuality("low"|"high"|"auto").
@@ -146,10 +149,17 @@ function show(container, opts) {
     8000
   );
   const profile = getRendererProfile();
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({
+    antialias: !profile.low,    // disable AA on mobile — big fill-rate savings
+    preserveDrawingBuffer: !profile.low,  // allow GPU double-buffering on mobile
+    powerPreference: "high-performance",
+  });
   renderer.setPixelRatio(profile.pixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
+  // BasicShadowMap is ~3× cheaper than the default PCFShadowMap; good enough
+  // for overview mode and drastically reduces GPU cost with GLB models.
+  if (profile.low) renderer.shadowMap.type = THREE.BasicShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
@@ -291,58 +301,76 @@ function show(container, opts) {
 
   // Animate + near-wall culling
   const roomCenter = new THREE.Vector3(room.width / 2, WALL_HEIGHT / 2, room.depth / 2);
+  let _lastAutoHideId = null;
+  let _frameCount = 0;
+  let _needsRender = true;
+  // Mark dirty when controls change (orbit/pan/zoom) or when items update
+  controls.addEventListener("change", () => { _needsRender = true; });
+  // Expose a way to force re-render from outside (e.g. after item move)
+  ctx._markDirty = () => { _needsRender = true; };
   const loop = () => {
     ctx.raf = requestAnimationFrame(loop);
     // Skip expensive controls.update + render when the tab/canvas is hidden.
     // Browsers throttle RAF when hidden but still fire it; the early-return
     // prevents bursty GPU work after long background periods on mobile.
     if (document.hidden) return;
+    _frameCount++;
     controls.update();
 
     // Wall visibility: combine manual hides (Set) with optional auto-hide of
-    // whichever wall faces the camera.
-    let autoHideId = null;
-    if (ctx.autoHide) {
-      const cx = camera.position.x - roomCenter.x;
-      const cz = camera.position.z - roomCenter.z;
-      if (Math.abs(cx) >= Math.abs(cz)) autoHideId = cx >= 0 ? "right" : "left";
-      else                              autoHideId = cz >= 0 ? "bottom" : "top";
-    }
-    wallList.forEach(m => {
-      const id = m.userData.wallId;
-      const manual = ctx.manualHidden.has(id);
-      m.visible = !manual && id !== autoHideId;
-    });
+    // whichever wall faces the camera. Only recompute when camera moved.
+    if (_needsRender) {
+      let autoHideId = null;
+      if (ctx.autoHide) {
+        const cx = camera.position.x - roomCenter.x;
+        const cz = camera.position.z - roomCenter.z;
+        if (Math.abs(cx) >= Math.abs(cz)) autoHideId = cx >= 0 ? "right" : "left";
+        else                              autoHideId = cz >= 0 ? "bottom" : "top";
+      }
+      if (autoHideId !== _lastAutoHideId) {
+        _lastAutoHideId = autoHideId;
+        wallList.forEach(m => {
+          const id = m.userData.wallId;
+          const manual = ctx.manualHidden.has(id);
+          m.visible = !manual && id !== autoHideId;
+        });
+      }
 
-    // Hide the ceiling when the camera looks from above (so the user can see
-    // inside the room from the orbit overview). Show it once the camera dips
-    // below ~110% of ceiling height — i.e. when looking horizontally or up.
-    if (ceilingGroup) {
-      const H = wallH(room);
-      ceilingGroup.visible = camera.position.y < H * 1.1;
+      // Hide the ceiling when the camera looks from above (so the user can see
+      // inside the room from the orbit overview). Show it once the camera dips
+      // below ~110% of ceiling height — i.e. when looking horizontally or up.
+      if (ceilingGroup) {
+        const H = wallH(room);
+        ceilingGroup.visible = camera.position.y < H * 1.1;
+      }
     }
 
-    // Keep selection outline attached to the currently selected mesh
-    if (ctx.selectedInstId) {
-      const mesh = ctx.instMeshes.get(ctx.selectedInstId);
-      if (mesh) {
-        selectionHelper.setFromObject(mesh);
-        selectionHelper.visible = true;
+    // Keep selection outline attached to the currently selected mesh (every 2nd frame)
+    if (_frameCount % 2 === 0) {
+      if (ctx.selectedInstId) {
+        const mesh = ctx.instMeshes.get(ctx.selectedInstId);
+        if (mesh) {
+          selectionHelper.setFromObject(mesh);
+          selectionHelper.visible = true;
+        } else {
+          selectionHelper.visible = false;
+        }
       } else {
         selectionHelper.visible = false;
       }
-    } else {
-      selectionHelper.visible = false;
     }
 
-    // Billboard cutouts: rotate to face camera so the photo is always visible
-    ctx.instMeshes.forEach((mesh) => {
-      if (mesh.userData._isBillboard) {
-        mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
-      }
-    });
+    // Billboard cutouts: rotate to face camera (every 3rd frame — smooth enough)
+    if (_frameCount % 3 === 0) {
+      ctx.instMeshes.forEach((mesh) => {
+        if (mesh.userData._isBillboard) {
+          mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+        }
+      });
+    }
 
     renderer.render(scene, camera);
+    _needsRender = false;
   };
   loop();
 }
@@ -429,6 +457,7 @@ function updateItems(items, findItem, selectedInstId, collisionSet, blockedSet) 
   renderItems(ctx, items);
   ctx.selectedInstId = selectedInstId || null;
   applyCollisionTint(ctx, collisionSet || new Set(), blockedSet || new Set());
+  if (ctx._markDirty) ctx._markDirty();
 }
 
 // Red emissive tint on any mesh whose instId is in the collision set.
@@ -1522,6 +1551,37 @@ function _addGlbPlaceholder(container, w, h, d) {
   container.add(mesh);
 }
 
+// Downscale any textures on a material that exceed maxSize (e.g. 512px).
+// GLB models often contain 2K/4K textures that kill mobile GPU memory.
+function _downscaleTextures(material, maxSize) {
+  if (!material) return;
+  const mats = Array.isArray(material) ? material : [material];
+  const texKeys = ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"];
+  for (const mat of mats) {
+    for (const key of texKeys) {
+      const tex = mat[key];
+      if (!tex || !tex.image) continue;
+      const img = tex.image;
+      const w = img.width || img.naturalWidth || 0;
+      const h = img.height || img.naturalHeight || 0;
+      if (w <= maxSize && h <= maxSize) continue;
+      // Downscale using an offscreen canvas
+      const scale = maxSize / Math.max(w, h);
+      const nw = Math.round(w * scale);
+      const nh = Math.round(h * scale);
+      try {
+        const cvs = document.createElement("canvas");
+        cvs.width = nw;
+        cvs.height = nh;
+        const c = cvs.getContext("2d");
+        c.drawImage(img, 0, 0, nw, nh);
+        tex.image = cvs;
+        tex.needsUpdate = true;
+      } catch (_) { /* ignore — texture stays at original size */ }
+    }
+  }
+}
+
 function buildFurnitureMesh(inst, item) {
   const w = inst.overrideW || item.w;
   const d = inst.overrideH || item.h;
@@ -1558,8 +1618,33 @@ function buildFurnitureMesh(inst, item) {
       const minY = newBox.min.y;
       model.position.sub(center);
       model.position.y -= minY;
+      const glbProfile = getRendererProfile();
       model.traverse(child => {
-        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+        if (!child.isMesh) return;
+        // Shadows are expensive — on mobile, skip them for GLB meshes.
+        child.castShadow = glbProfile.glbShadows;
+        child.receiveShadow = glbProfile.glbShadows;
+        // On mobile, downgrade PBR (MeshStandardMaterial) to cheaper Lambert.
+        // This halves the GPU shading cost per fragment.
+        if (glbProfile.simplifyGlbMaterials && child.material && child.material.isMeshStandardMaterial) {
+          const oldMat = child.material;
+          const newMat = new THREE.MeshLambertMaterial({
+            color: oldMat.color,
+            map: oldMat.map,
+            transparent: oldMat.transparent,
+            opacity: oldMat.opacity,
+            side: oldMat.side,
+          });
+          child.material = newMat;
+          oldMat.dispose();
+        }
+        // Ensure frustum culling is on (Three.js default, but some exporters disable it)
+        child.frustumCulled = true;
+        // On mobile, downscale large textures (2K/4K) in GLB models to 512px.
+        // This is the single largest GPU memory win for imported models.
+        if (glbProfile.low) {
+          _downscaleTextures(child.material, 512);
+        }
       });
       container.add(model);
     }
@@ -1706,10 +1791,15 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
     1, 8000
   );
   const profile = getRendererProfile();
-  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({
+    antialias: !profile.low,
+    preserveDrawingBuffer: !profile.low,
+    powerPreference: "high-performance",
+  });
   renderer.setPixelRatio(profile.pixelRatio);
   renderer.setSize(container.clientWidth || 800, container.clientHeight || 500);
   renderer.shadowMap.enabled = true;
+  if (profile.low) renderer.shadowMap.type = THREE.BasicShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.style.touchAction = "none";
   container.appendChild(renderer.domElement);
