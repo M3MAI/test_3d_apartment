@@ -1487,6 +1487,41 @@ function getContactShadowTexture() {
   return _contactShadowTex;
 }
 
+// Efficient base64 → ArrayBuffer without the atob()+Uint8Array.from() OOM pattern.
+// Uses atob() but copies bytes in small chunks to avoid call-stack overflow and
+// keeps peak memory to ~1.33× the decoded size (vs ~4× with the old approach).
+function _base64ToArrayBuffer(b64) {
+  const raw = atob(b64);
+  const len = raw.length;
+  const buf = new ArrayBuffer(len);
+  const view = new Uint8Array(buf);
+  // Process in 8KB chunks — avoids call-stack overflow from large spread/apply
+  // while remaining far faster than char-by-char iteration.
+  const CHUNK = 8192;
+  for (let i = 0; i < len; i += CHUNK) {
+    const end = Math.min(i + CHUNK, len);
+    for (let j = i; j < end; j++) {
+      view[j] = raw.charCodeAt(j);
+    }
+  }
+  return buf;
+}
+
+// Placeholder box for GLB models that fail to load — keeps the item visible
+// and selectable so the user can delete/reposition it.
+function _addGlbPlaceholder(container, w, h, d) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xff8844,
+    transparent: true,
+    opacity: 0.4,
+    wireframe: true,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = h / 2;
+  container.add(mesh);
+}
+
 function buildFurnitureMesh(inst, item) {
   const w = inst.overrideW || item.w;
   const d = inst.overrideH || item.h;
@@ -1503,7 +1538,8 @@ function buildFurnitureMesh(inst, item) {
     container.userData.itemId = inst.itemId;
     container.userData.rotation = inst.rotation || 0;
     container.userData._isGLB = true;
-    container.userData._glbData = item.glbData;
+    // NOTE: intentionally NOT storing item.glbData on userData — it's a huge
+    // binary blob and keeping a reference here would double memory usage.
     container.position.set(inst.x, lift, inst.y);
     container.rotation.set(
       -((inst.rotationX || 0) * Math.PI) / 180,
@@ -1527,18 +1563,41 @@ function buildFurnitureMesh(inst, item) {
       });
       container.add(model);
     }
-    const cached = _glbCache.get(item.glbData);
-    if (cached) {
-      scaleAndPlaceModel(cached.clone());
-    } else {
-      const loader = new GLTFLoader();
-      const binary = Uint8Array.from(atob(item.glbData), c => c.charCodeAt(0));
-      loader.parse(binary.buffer, "", (gltf) => {
-        _glbCache.set(item.glbData, gltf.scene);
-        scaleAndPlaceModel(gltf.scene);
-      }, (err) => {
-        if (typeof window.toast === "function") window.toast("فشل تحميل نموذج 3D", "err");
-      });
+
+    // Use the item ID as cache key — NOT the glbData blob, which would
+    // duplicate megabytes of binary just for the Map key.
+    const cacheKey = "glb:" + (inst.itemId || inst.instId);
+
+    try {
+      const cached = _glbCache.get(cacheKey);
+      if (cached) {
+        scaleAndPlaceModel(cached.clone());
+      } else {
+        const loader = new GLTFLoader();
+        // Accept both ArrayBuffer (new format) and base64 string (legacy).
+        let buffer;
+        if (item.glbData instanceof ArrayBuffer) {
+          buffer = item.glbData;
+        } else if (typeof item.glbData === "string") {
+          // Efficient base64 → ArrayBuffer conversion (chunk-safe, no stack overflow).
+          buffer = _base64ToArrayBuffer(item.glbData);
+        } else {
+          throw new Error("Unsupported glbData type: " + typeof item.glbData);
+        }
+        loader.parse(buffer, "", (gltf) => {
+          _glbCache.set(cacheKey, gltf.scene);
+          scaleAndPlaceModel(gltf.scene);
+        }, (parseErr) => {
+          console.warn("GLB parse error:", parseErr);
+          if (typeof window.toast === "function") window.toast("فشل تحميل نموذج 3D", "err");
+          // Add a placeholder box so the item is still visible/selectable
+          _addGlbPlaceholder(container, w, h, d);
+        });
+      }
+    } catch (loadErr) {
+      console.warn("GLB load error:", loadErr);
+      if (typeof window.toast === "function") window.toast("تعذّر تحميل نموذج 3D — الملف قد يكون تالفاً", "err");
+      _addGlbPlaceholder(container, w, h, d);
     }
     const shGeo = new THREE.PlaneGeometry(w * 0.9, d * 0.9);
     const shMat = new THREE.MeshBasicMaterial({ map: getContactShadowTexture(), transparent: true, opacity: 0.3, depthWrite: false });

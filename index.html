@@ -22,6 +22,7 @@
 <body data-theme="light">
   <header class="topbar">
     <div class="brand">
+      <button id="btn-mobile-menu" class="btn icon-btn mobile-menu-btn" title="القائمة" aria-label="فتح القائمة">☰</button>
       <span class="logo">🏠</span>
       <div>
         <h1>مصمم الشقة التفاعلي</h1>
@@ -53,7 +54,8 @@
   </header>
 
   <main>
-    <aside class="sidebar">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+    <aside class="sidebar" id="sidebar-panel">
       <section class="room-picker">
         <h2>الغرف</h2>
         <ul id="room-list"></ul>
@@ -158,6 +160,30 @@
     <span>تحليل مبني على فيديو التصوير — <a href="docs/ANALYSIS.md">راجع تقرير التحليل</a></span>
     <span class="copyright">M3MAI / test_3d_apartment</span>
   </footer>
+
+  <!-- Mobile bottom navigation bar -->
+  <nav class="mobile-bottomnav" id="mobile-bottomnav">
+    <button class="mnav-btn" id="mnav-rooms" title="الغرف">
+      <span class="mnav-icon">🏠</span>
+      <span class="mnav-label">الغرف</span>
+    </button>
+    <button class="mnav-btn" id="mnav-catalog" title="الأثاث">
+      <span class="mnav-icon">🪑</span>
+      <span class="mnav-label">الأثاث</span>
+    </button>
+    <button class="mnav-btn" id="mnav-view" title="تبديل العرض">
+      <span class="mnav-icon">🔲</span>
+      <span class="mnav-label">3D</span>
+    </button>
+    <button class="mnav-btn" id="mnav-save" title="حفظ">
+      <span class="mnav-icon">💾</span>
+      <span class="mnav-label">حفظ</span>
+    </button>
+    <button class="mnav-btn" id="mnav-more" title="المزيد">
+      <span class="mnav-icon">⋯</span>
+      <span class="mnav-label">المزيد</span>
+    </button>
+  </nav>
 
   <div id="toast-host" aria-live="polite"></div>
 

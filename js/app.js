@@ -19,6 +19,38 @@ const ZOOM_MAX        = 4.0;
 const ZOOM_STEP       = 1.15;
 const DEFAULT_WALL_HEIGHT = 270;  // cm, used by 3D view when room has no explicit height
 
+// ---------- ArrayBuffer ↔ Base64 helpers (for GLB data serialization) ----------
+// Convert an ArrayBuffer to a base64 string (for JSON serialization in share/export).
+// Uses a chunk-based approach to avoid call-stack overflow on large buffers.
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 8192;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+    binary += String.fromCharCode.apply(null, slice);
+  }
+  return btoa(binary);
+}
+// Ensure glbData is a base64 string for JSON-serializable contexts.
+// Accepts ArrayBuffer, base64 string, or null. Returns string or null.
+function ensureGlbBase64(glbData) {
+  if (!glbData) return null;
+  if (typeof glbData === "string") return glbData;
+  if (glbData instanceof ArrayBuffer) return arrayBufferToBase64(glbData);
+  return null;
+}
+// Prepare a list of custom items for JSON serialization (share/export/cloud).
+// Converts any ArrayBuffer glbData to base64 strings.
+function serializeCustomItems(items) {
+  return items.map(it => {
+    if (it.glbData && it.glbData instanceof ArrayBuffer) {
+      return { ...it, glbData: arrayBufferToBase64(it.glbData) };
+    }
+    return it;
+  });
+}
+
 // ---------- State ----------
 const state = {
   layouts: loadLayouts(),        // { roomId: [ {instId, itemId, groupId, x, y, rotation}, ... ] }
@@ -935,7 +967,7 @@ function bindCustomModal() {
   let rawImageData = null;       // original image data URL before bg removal
   let processedSide = null;      // { image, sideColor } for side photo
   let processedTop = null;       // { image } for top photo
-  let glbBase64 = null;          // base64-encoded GLB file data
+  let glbBase64 = null;          // base64-encoded GLB file data (or ArrayBuffer)
 
   function reset() {
     document.getElementById("ci-name").value = "";
@@ -1058,37 +1090,23 @@ function bindCustomModal() {
     });
   }
 
-  // GLB 3D model file handler — with size limit and memory-efficient base64
+  // GLB 3D model file handler — no size limit; stores as ArrayBuffer in IDB
   if (glbInput) {
     glbInput.addEventListener("change", () => {
       const file = glbInput.files[0];
       if (!file) { glbBase64 = null; return; }
-      const MAX_GLB_MB = 10;
-      if (file.size > MAX_GLB_MB * 1024 * 1024) {
-        err.textContent = `حجم الملف كبير جداً (${(file.size / 1024 / 1024).toFixed(1)} MB). الحد الأقصى هو ${MAX_GLB_MB} MB.`;
-        err.hidden = false;
-        glbInput.value = "";
-        return;
-      }
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const blob = new Blob([reader.result], { type: "application/octet-stream" });
-          const urlReader = new FileReader();
-          urlReader.onload = () => {
-            glbBase64 = urlReader.result.split(",")[1];
-            err.hidden = true;
-            if (!processed) {
-              processed = { image: "", sideColor: "#888888", hasAlpha: false };
-            }
-          };
-          urlReader.onerror = () => {
-            err.textContent = "تعذّر معالجة ملف 3D — حاول مرة أخرى";
-            err.hidden = false;
-          };
-          urlReader.readAsDataURL(blob);
+          // Store the raw ArrayBuffer — IndexedDB handles binary natively.
+          // three-view.js will accept either ArrayBuffer or legacy base64 string.
+          glbBase64 = reader.result; // ArrayBuffer
+          err.hidden = true;
+          if (!processed) {
+            processed = { image: "", sideColor: "#888888", hasAlpha: false };
+          }
         } catch (e) {
-          err.textContent = "تعذّر معالجة ملف 3D — الملف كبير جداً أو تالف";
+          err.textContent = "تعذّر معالجة ملف 3D — حاول مرة أخرى";
           err.hidden = false;
           glbBase64 = null;
         }
@@ -1321,7 +1339,7 @@ function exportJSON() {
     layouts: state.layouts,
     overrides: loadRoomOverrides(),
     prices: state.prices,
-    customItems: window.CustomItems.all(),
+    customItems: serializeCustomItems(window.CustomItems.all()),
     wallPhotos,
   };
   const json = JSON.stringify(project);
@@ -3385,7 +3403,7 @@ async function shareViaUrl() {
       layouts: state.layouts,
       overrides: loadRoomOverrides(),
       prices: state.prices,
-      customItems: usedCustomItems,
+      customItems: serializeCustomItems(usedCustomItems),
     };
     const json = JSON.stringify(payload);
     const b64 = btoa(unescape(encodeURIComponent(json)));
@@ -3498,7 +3516,11 @@ async function saveToCloud() {
       if (clone.autoTop) clone.autoTop = await compressImageForCloud(clone.autoTop);
       if (clone.imageSide) clone.imageSide = await compressImageForCloud(clone.imageSide);
       if (clone.imageTop) clone.imageTop = await compressImageForCloud(clone.imageTop);
-      // Keep glbData — the recipient must see the exact 3D model
+      // Keep glbData — the recipient must see the exact 3D model.
+      // Convert ArrayBuffer to base64 string for JSON serialization.
+      if (clone.glbData && clone.glbData instanceof ArrayBuffer) {
+        clone.glbData = arrayBufferToBase64(clone.glbData);
+      }
       // Only strip internal cache fields
       delete clone._rawImage;
       compressedItems.push(clone);

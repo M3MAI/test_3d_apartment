@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #f4f6fb;
   --panel: #ffffff;
   --panel-2: #f8faff;
@@ -427,15 +427,137 @@ main {
 .bottombar a { color: #b9c9ff; }
 body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 
+/* Mobile menu button — hidden on desktop */
+.mobile-menu-btn { display: none; }
+
+/* Sidebar backdrop (mobile drawer overlay) */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 30, 0.55);
+  z-index: 998;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.sidebar-backdrop.visible { display: block; }
+
+/* Mobile bottom navigation — hidden on desktop */
+.mobile-bottomnav { display: none; }
+
 /* Responsive */
 @media (max-width: 1100px) {
   main { grid-template-columns: 240px 1fr; }
   .details { display: none; }
 }
+
 @media (max-width: 760px) {
+  /* ---- Topbar: compact ---- */
+  .topbar { padding: 6px 10px; gap: 6px; }
+  .topbar .brand h1 { font-size: 15px; }
+  .topbar .brand .subtitle { display: none; }
+  .mobile-menu-btn { display: inline-flex; font-size: 20px; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; }
+  .top-actions { gap: 3px; }
+  .top-actions .btn { padding: 6px 8px; font-size: 12px; min-height: 36px; }
+  .top-actions .btn.icon-btn { min-width: 36px; min-height: 36px; font-size: 16px; }
+  .top-actions .divider { display: none; }
+  /* Hide secondary buttons on mobile topbar — accessible via bottom nav "More" */
+  .top-actions #btn-print,
+  .top-actions #btn-share,
+  .top-actions #btn-png,
+  .top-actions #btn-glb,
+  .top-actions #btn-cost,
+  .top-actions #btn-help,
+  .top-actions #btn-unit,
+  .top-actions #btn-reset,
+  .top-actions #btn-save,
+  .top-actions #btn-export,
+  .top-actions .import-label,
+  .top-actions #btn-cloud-save { display: none; }
+
+  /* ---- Layout: single column, stage fills screen ---- */
   main { grid-template-columns: 1fr; }
-  .sidebar { border-inline-end: none; border-bottom: 1px solid var(--border); max-height: 40vh; }
-  .top-actions { width: 100%; justify-content: flex-start; }
+
+  /* ---- Sidebar: off-screen drawer ---- */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 85vw;
+    max-width: 340px;
+    z-index: 999;
+    border-inline-end: none;
+    border-bottom: none;
+    max-height: none;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* ---- Stage: maximize viewport for 3D ---- */
+  .stage { padding: 8px; gap: 6px; }
+  .stage-header { gap: 6px; }
+  .stage-title h2 { font-size: 16px; }
+  .stage-meta { font-size: 11px; gap: 2px; }
+  .stage-meta .sep { margin: 0 3px; }
+  .stage-meta #btn-edit-room,
+  .stage-meta #btn-room-layouts { padding: 2px 6px; font-size: 11px; }
+  .room-container { min-height: calc(100vh - 180px); border-radius: 8px; }
+
+  /* ---- View controls: touch-friendly ---- */
+  .view-controls { flex-wrap: wrap; padding: 3px; gap: 2px; }
+  .view-controls .btn.sm { min-height: 36px; min-width: 36px; padding: 6px 8px; font-size: 13px; }
+  .view-mode-toggle .btn.sm { min-height: 36px; padding: 6px 10px; }
+  .zoom-level { font-size: 13px; }
+
+  /* ---- Bottom nav: show on mobile ---- */
+  .mobile-bottomnav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 997;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+    padding: 4px 0;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    justify-content: space-around;
+    align-items: center;
+  }
+  .mnav-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 6px 12px;
+    min-width: 52px;
+    min-height: 44px;
+    font-family: inherit;
+    transition: color 0.15s;
+    border-radius: 8px;
+  }
+  .mnav-btn:hover, .mnav-btn:active { color: var(--accent); background: var(--accent-soft); }
+  .mnav-btn.active { color: var(--accent); }
+  .mnav-icon { font-size: 20px; line-height: 1; }
+  .mnav-label { font-size: 10px; font-weight: 700; line-height: 1.2; }
+
+  /* Footer: hidden on mobile (bottom nav replaces it) */
+  .bottombar { display: none; }
+
+  /* Stage help text: compact */
+  .stage-help { font-size: 10px; gap: 6px; }
 }
 
 /* ---------- View-mode toggle + 3D container ---------- */
@@ -1354,24 +1476,28 @@ kbd {
     border-bottom: none;
   }
   .sidebar.hidden { display: none; }
-  .topbar { padding: 6px 10px; }
-  .topbar .brand h1 { font-size: 14px; }
-  .topbar .brand .subtitle { display: none; }
-  .top-actions { gap: 3px; }
-  .top-actions .btn { padding: 4px 8px; font-size: 11px; }
-  .top-actions .divider { display: none; }
+.plan-dim-tip[hidden] { display: none; }
+
+/* ==========================================================================
+   Responsive: <480px (small phones — additional tweaks)
+   Sidebar drawer is already handled by the 760px breakpoint above.
+   ========================================================================== */
+@media (max-width: 480px) {
+  .topbar .brand h1 { font-size: 13px; }
+  .topbar .brand .logo { font-size: 22px; }
   #furniture-catalog { grid-template-columns: 1fr; }
   .cat-group { grid-column: span 1; }
-  .modal { max-width: 100%; margin: 0 4px; }
+  .modal { max-width: 100%; margin: 0 4px; border-radius: 10px; }
   .modal-head { padding: 10px 12px; }
   .modal-body { padding: 10px 12px; }
   .modal-foot { padding: 8px 12px; }
   #custom-modal .fields-row { grid-template-columns: 1fr; }
   #room-modal .fields-row { grid-template-columns: 1fr; }
-  .room-container { min-height: 200px; }
-  .view-controls { flex-wrap: wrap; }
+  .room-container { min-height: calc(100vh - 160px); }
   .wall-color-grid { grid-template-columns: 1fr; }
   .walk-room-grid { grid-template-columns: repeat(2, 1fr); }
   .onboarding .ob-card { padding: 16px; }
   .cost-table { font-size: 11px; }
+  /* Bottom nav: account for safe area on notched phones */
+  .mobile-bottomnav { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
 }
