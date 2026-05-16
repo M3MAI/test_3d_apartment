@@ -540,11 +540,24 @@ function applyWallPhotoToAllRooms(wallId, dataUrl, settings) {
   });
 }
 
+// ---------- Cached allGroups / findItem (perf: avoids linear scan per lookup) ----------
+let _allGroupsCache = null;
+let _allGroupsCustomRev = -1;   // track CustomItems revision to invalidate
+let _findItemMap = null;        // Map<"groupId:itemId", item>
 function allGroups() {
+  const curRev = (window.CustomItems && window.CustomItems._rev) || 0;
+  if (_allGroupsCache && _allGroupsCustomRev === curRev) return _allGroupsCache;
   const groups = FURNITURE_GROUPS.slice();
   const custom = window.CustomItems ? window.CustomItems.group() : null;
   if (custom && custom.items.length) groups.push(custom);
+  _allGroupsCache = groups;
+  _allGroupsCustomRev = curRev;
+  _findItemMap = null; // invalidate item map when groups change
   return groups;
+}
+function _invalidateGroupsCache() {
+  _allGroupsCache = null;
+  _findItemMap = null;
 }
 
 // ---------- Modal focus-trap (A11y) ----------
@@ -2018,13 +2031,31 @@ function renderFurniture(inst, collisionSet, blockedSet) {
 }
 
 function findItem(groupId, itemId) {
-  const group = allGroups().find(g => g.id === groupId);
-  if (!group) return null;
-  return group.items.find(i => i.id === itemId);
+  if (!_findItemMap) {
+    _findItemMap = new Map();
+    allGroups().forEach(g => g.items.forEach(i => _findItemMap.set(g.id + ":" + i.id, i)));
+  }
+  return _findItemMap.get(groupId + ":" + itemId) || null;
 }
 
-// ---------- Collision detection (OBB/SAT) ----------
+// ---------- Collision detection (OBB/SAT) — with cache ----------
+let _collisionCacheKey = "";
+let _collisionCacheResult = new Set();
+let _blockedCacheKey = "";
+let _blockedCacheResult = { blocked: new Set(), violated: [] };
+function _layoutHash(items) {
+  // Fast hash: concatenate positions/rotations/overrides. Cheap compared to
+  // running O(n²) SAT tests.
+  let h = items.length + "|";
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    h += it.instId + "," + it.x + "," + it.y + "," + (it.rotation || 0) + "," + (it.overrideW || 0) + "," + (it.overrideH || 0) + "|";
+  }
+  return h;
+}
 function detectCollisions(items) {
+  const key = _layoutHash(items);
+  if (key === _collisionCacheKey) return _collisionCacheResult;
   const collisions = new Set();
   const boxes = items.map(inst => {
     const item = findItem(inst.groupId, inst.itemId);
@@ -2040,6 +2071,8 @@ function detectCollisions(items) {
       }
     }
   }
+  _collisionCacheKey = key;
+  _collisionCacheResult = collisions;
   return collisions;
 }
 function obb(cx, cy, w, h, angleDeg, id) {
@@ -2097,9 +2130,15 @@ function rectAsObb(r) {
   return obb(r.x + r.w/2, r.y + r.h/2, r.w, r.h, 0, "_clearance");
 }
 function detectDoorBlocks(room, items) {
+  const key = (room ? room.id : "") + "|" + _layoutHash(items);
+  if (key === _blockedCacheKey) return _blockedCacheResult;
   const blocked = new Set();
   const violated = []; // openings whose clearance is violated (for highlight)
-  if (!room || !room.openings || !room.openings.length) return { blocked, violated };
+  if (!room || !room.openings || !room.openings.length) {
+    _blockedCacheKey = key;
+    _blockedCacheResult = { blocked, violated };
+    return _blockedCacheResult;
+  }
   const itemBoxes = items.map(inst => {
     const item = findItem(inst.groupId, inst.itemId);
     if (!item) return null;
@@ -2115,7 +2154,9 @@ function detectDoorBlocks(room, items) {
     }
     if (hit) violated.push(op);
   }
-  return { blocked, violated };
+  _blockedCacheKey = key;
+  _blockedCacheResult = { blocked, violated };
+  return _blockedCacheResult;
 }
 function setBlockedIndicator(n) {
   const el = document.getElementById("blocked-indicator");
@@ -2298,11 +2339,13 @@ function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 // Escape user-controlled strings before inlining them into innerHTML / SVG
 // templates. Rooms, items, and layouts can be seeded from URL share payloads,
 // so we sanitize every string that reaches the DOM via innerHTML.
+// Perf: uses string replacement instead of DOM element creation — avoids
+// thousands of transient DOM allocations per render cycle.
+const _escMap = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const _escRe = /[&<>"']/g;
 function esc(s) {
   if (s == null) return "";
-  const d = document.createElement("div");
-  d.textContent = String(s);
-  return d.innerHTML;
+  return String(s).replace(_escRe, c => _escMap[c]);
 }
 // Validate a CSS color — allow only #rgb/#rrggbb hex to avoid CSS injection
 // via share URLs. Falls back to a neutral color when the input is invalid.

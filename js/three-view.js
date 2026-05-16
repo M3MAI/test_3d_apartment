@@ -296,6 +296,7 @@ function show(container, opts) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    _needsRender = true;   // resize needs a re-render
   });
   ctx.resizeObs.observe(container);
 
@@ -315,59 +316,58 @@ function show(container, opts) {
     // prevents bursty GPU work after long background periods on mobile.
     if (document.hidden) return;
     _frameCount++;
-    controls.update();
+    controls.update();  // fires 'change' event if damping is still active → sets _needsRender
+
+    // Skip GPU work entirely when scene hasn't changed (no camera move,
+    // no item update, no resize). This is the single biggest idle-power
+    // savings — a static 3D view drops from 60 render() calls/sec to 0.
+    if (!_needsRender) return;
 
     // Wall visibility: combine manual hides (Set) with optional auto-hide of
     // whichever wall faces the camera. Only recompute when camera moved.
-    if (_needsRender) {
-      let autoHideId = null;
-      if (ctx.autoHide) {
-        const cx = camera.position.x - roomCenter.x;
-        const cz = camera.position.z - roomCenter.z;
-        if (Math.abs(cx) >= Math.abs(cz)) autoHideId = cx >= 0 ? "right" : "left";
-        else                              autoHideId = cz >= 0 ? "bottom" : "top";
-      }
-      if (autoHideId !== _lastAutoHideId) {
-        _lastAutoHideId = autoHideId;
-        wallList.forEach(m => {
-          const id = m.userData.wallId;
-          const manual = ctx.manualHidden.has(id);
-          m.visible = !manual && id !== autoHideId;
-        });
-      }
-
-      // Hide the ceiling when the camera looks from above (so the user can see
-      // inside the room from the orbit overview). Show it once the camera dips
-      // below ~110% of ceiling height — i.e. when looking horizontally or up.
-      if (ceilingGroup) {
-        const H = wallH(room);
-        ceilingGroup.visible = camera.position.y < H * 1.1;
-      }
+    let autoHideId = null;
+    if (ctx.autoHide) {
+      const cx = camera.position.x - roomCenter.x;
+      const cz = camera.position.z - roomCenter.z;
+      if (Math.abs(cx) >= Math.abs(cz)) autoHideId = cx >= 0 ? "right" : "left";
+      else                              autoHideId = cz >= 0 ? "bottom" : "top";
+    }
+    if (autoHideId !== _lastAutoHideId) {
+      _lastAutoHideId = autoHideId;
+      wallList.forEach(m => {
+        const id = m.userData.wallId;
+        const manual = ctx.manualHidden.has(id);
+        m.visible = !manual && id !== autoHideId;
+      });
     }
 
-    // Keep selection outline attached to the currently selected mesh (every 2nd frame)
-    if (_frameCount % 2 === 0) {
-      if (ctx.selectedInstId) {
-        const mesh = ctx.instMeshes.get(ctx.selectedInstId);
-        if (mesh) {
-          selectionHelper.setFromObject(mesh);
-          selectionHelper.visible = true;
-        } else {
-          selectionHelper.visible = false;
-        }
+    // Hide the ceiling when the camera looks from above (so the user can see
+    // inside the room from the orbit overview). Show it once the camera dips
+    // below ~110% of ceiling height — i.e. when looking horizontally or up.
+    if (ceilingGroup) {
+      const H = wallH(room);
+      ceilingGroup.visible = camera.position.y < H * 1.1;
+    }
+
+    // Keep selection outline attached to the currently selected mesh
+    if (ctx.selectedInstId) {
+      const mesh = ctx.instMeshes.get(ctx.selectedInstId);
+      if (mesh) {
+        selectionHelper.setFromObject(mesh);
+        selectionHelper.visible = true;
       } else {
         selectionHelper.visible = false;
       }
+    } else {
+      selectionHelper.visible = false;
     }
 
-    // Billboard cutouts: rotate to face camera (every 3rd frame — smooth enough)
-    if (_frameCount % 3 === 0) {
-      ctx.instMeshes.forEach((mesh) => {
-        if (mesh.userData._isBillboard) {
-          mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
-        }
-      });
-    }
+    // Billboard cutouts: rotate to face camera
+    ctx.instMeshes.forEach((mesh) => {
+      if (mesh.userData._isBillboard) {
+        mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+      }
+    });
 
     renderer.render(scene, camera);
     _needsRender = false;

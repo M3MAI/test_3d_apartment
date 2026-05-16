@@ -61,6 +61,7 @@ function idbReplaceAll(items) {
 const CustomItems = {
   _cache: null,
   _ready: false,
+  _rev: 0,  // revision counter — cache invalidation signal for app.js allGroups()
   // Async — call once at app boot to hydrate from IDB (or migrate from
   // localStorage). Until this resolves, `all()` returns whatever it can read
   // from localStorage synchronously so first paint isn't blocked.
@@ -85,6 +86,7 @@ const CustomItems = {
       // IDB unavailable — keep localStorage cache.
     }
     this._ready = true;
+    this._rev++;
     // Force-slim localStorage to free quota (old versions stored full images)
     try {
       const slim = (this._cache || []).map(it => {
@@ -138,6 +140,7 @@ const CustomItems = {
       this._cache.pop();
       return false;
     }
+    this._rev++;
     return true;
   },
   async update(id, patch) {
@@ -151,11 +154,13 @@ const CustomItems = {
       this._cache[idx] = prev;
       return false;
     }
+    this._rev++;
     return true;
   },
   async remove(id) {
     this.all();
     this._cache = this._cache.filter(i => i.id !== id);
+    this._rev++;
     await this._save();
   },
   find(id) {
@@ -163,6 +168,7 @@ const CustomItems = {
   },
   async clear() {
     this._cache = [];
+    this._rev++;
     await this._save();
   },
   group() {

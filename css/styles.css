@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #f4f6fb;
   --panel: #ffffff;
   --panel-2: #f8faff;
@@ -98,14 +98,16 @@ main {
   grid-template-columns: 280px 1fr 280px;
   flex: 1;
   overflow: hidden;
+  contain: layout style;
 }
 .sidebar, .details {
   background: var(--panel);
   border-inline-start: 1px solid var(--border);
   padding: 16px;
   overflow-y: auto;
+  contain: content;
 }
-.sidebar { border-inline-start: none; border-inline-end: 1px solid var(--border); }
+.sidebar { border-inline-start: none; border-inline-end: 1px solid var(--border); will-change: transform; }
 
 .sidebar h2, .details h2 {
   font-size: 13px;
@@ -255,6 +257,7 @@ main {
   gap: 10px;
   min-width: 0;
   background: var(--stage-bg);
+  contain: layout style;
 }
 .stage-header {
   display: flex;
@@ -300,6 +303,8 @@ main {
   justify-content: center;
   min-height: 300px;
   touch-action: none;
+  contain: layout style;
+  will-change: contents;
 }
 .room-container.panning { cursor: grabbing; }
 .room-container.pan-ready { cursor: grab; }
