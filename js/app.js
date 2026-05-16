@@ -2441,6 +2441,8 @@ function setupFurnitureInteractions(svg, room) {
     // the user clicked an item already in the set (then keep the set so they
     // can drag the lead item without losing selection).
     if (!state.selectedInstIds.has(instId)) state.selectedInstIds.clear();
+    // Suppress the bottom-sheet during potential drag — it opens on tap (onUp)
+    _suppressSheet = true;
     renderSelection();
     if (prevSelected !== instId) {
       document.querySelectorAll(".furniture.selected").forEach(n => n.classList.remove("selected"));
@@ -2570,6 +2572,7 @@ function setupFurnitureInteractions(svg, room) {
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
+      _suppressSheet = false;
       drawAlignGuides(svg, [], room); // clear
       if (moved) {
         // push the pre-drag state to history so undo reverts the drag
@@ -2580,6 +2583,10 @@ function setupFurnitureInteractions(svg, room) {
         drawRoom();
         renderSelection();
         updateUndoRedoButtons();
+      } else {
+        // It was a tap, not a drag — show the details bottom-sheet now
+        const dp = document.getElementById("details-panel");
+        if (dp) dp.classList.add("sheet-visible");
       }
     }
     document.addEventListener("mousemove", onMove);
@@ -2687,12 +2694,19 @@ function fitView() {
 }
 
 // ---------- Selection details panel ----------
+// Gate the bottom-sheet during drag: only show on tap (no movement).
+// Set to true by setupFurnitureInteractions.onDown, cleared by onUp.
+let _suppressSheet = false;
+
 function renderSelection() {
   const panel = document.getElementById("selection-info");
   const detailsPanel = document.getElementById("details-panel");
   // Helper: show/hide the bottom-sheet on tablet/mobile (≤1100px).
-  // On desktop the .details column is always visible, so this is a no-op.
-  const showSheet = () => { if (detailsPanel) detailsPanel.classList.add("sheet-visible"); };
+  // On desktop the .details column is always visible via CSS, so this is harmless.
+  const showSheet = () => {
+    if (_suppressSheet) return; // don't open sheet while user might be dragging
+    if (detailsPanel) detailsPanel.classList.add("sheet-visible");
+  };
   const hideSheet = () => { if (detailsPanel) detailsPanel.classList.remove("sheet-visible"); };
 
   if (!state.activeRoomId) {
