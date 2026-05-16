@@ -450,12 +450,17 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 /* Mobile bottom navigation — hidden on desktop */
 .mobile-bottomnav { display: none; }
 
-/* Responsive */
+/* ==========================================================================
+   Responsive: Tablet (761px - 1100px)
+   ========================================================================== */
 @media (max-width: 1100px) {
   main { grid-template-columns: 240px 1fr; }
   .details { display: none; }
 }
 
+/* ==========================================================================
+   Responsive: Mobile (≤760px) — sidebar drawer, bottom nav, touch targets
+   ========================================================================== */
 @media (max-width: 760px) {
   /* ---- Topbar: compact ---- */
   .topbar { padding: 6px 10px; gap: 6px; }
@@ -483,7 +488,7 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
   /* ---- Layout: single column, stage fills screen ---- */
   main { grid-template-columns: 1fr; }
 
-  /* ---- Sidebar: off-screen drawer ---- */
+  /* ---- Sidebar: off-screen drawer (GPU-accelerated) ---- */
   .sidebar {
     position: fixed;
     top: 0;
@@ -495,14 +500,15 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
     border-inline-end: none;
     border-bottom: none;
     max-height: none;
-    transform: translateX(100%);
+    transform: translate3d(100%, 0, 0);
     transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: -4px 0 24px rgba(0,0,0,0.15);
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .sidebar.open {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 
   /* ---- Stage: maximize viewport for 3D ---- */
@@ -515,10 +521,10 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
   .stage-meta #btn-room-layouts { padding: 2px 6px; font-size: 11px; }
   .room-container { min-height: calc(100vh - 180px); border-radius: 8px; }
 
-  /* ---- View controls: touch-friendly ---- */
+  /* ---- View controls: touch-friendly (44px min targets) ---- */
   .view-controls { flex-wrap: wrap; padding: 3px; gap: 2px; }
-  .view-controls .btn.sm { min-height: 36px; min-width: 36px; padding: 6px 8px; font-size: 13px; }
-  .view-mode-toggle .btn.sm { min-height: 36px; padding: 6px 10px; }
+  .view-controls .btn.sm { min-height: 40px; min-width: 40px; padding: 6px 8px; font-size: 13px; }
+  .view-mode-toggle .btn.sm { min-height: 40px; padding: 6px 10px; }
   .zoom-level { font-size: 13px; }
 
   /* ---- Bottom nav: show on mobile ---- */
@@ -552,6 +558,7 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
     font-family: inherit;
     transition: color 0.15s;
     border-radius: 8px;
+    -webkit-tap-highlight-color: transparent;
   }
   .mnav-btn:hover, .mnav-btn:active { color: var(--accent); background: var(--accent-soft); }
   .mnav-btn.active { color: var(--accent); }
@@ -563,6 +570,26 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 
   /* Stage help text: compact */
   .stage-help { font-size: 10px; gap: 6px; }
+
+  /* ---- 3D canvas: optimize rendering for mobile GPUs ---- */
+  .three-wrap canvas {
+    image-rendering: auto;
+  }
+
+  /* ---- Safe-area: notched devices (iPhone X+ etc.) ---- */
+  .topbar { padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .stage { padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); }
+
+  /* ---- Touch: all interactive elements meet 44px minimum ---- */
+  .btn, button { min-height: 36px; }
+  .cat-item { min-height: 44px; }
+  .room-item { min-height: 44px; }
+  .cat-chip { min-height: 32px; padding: 6px 10px; }
+
+  /* ---- Selection panel: compact on mobile ---- */
+  .dim-slider { height: 28px; }
+  .sel-actions { flex-wrap: wrap; }
+  .sel-actions .btn { flex: 1 1 auto; min-width: 60px; }
 }
 
 /* ---------- View-mode toggle + 3D container ---------- */
@@ -1490,4 +1517,32 @@ kbd {
   .onboarding .ob-card { padding: 16px; }
   .cost-table { font-size: 11px; }
   .mobile-bottomnav { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  /* Minimize 3D minimap on tiny screens */
+  .walk-minimap { width: 100px; height: 100px; }
+}
+
+/* ==========================================================================
+   Accessibility: Reduced Motion
+   Users who prefer reduced motion (common on mobile) skip all animations.
+   This reduces GPU compositing overhead and avoids vestibular discomfort.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .sidebar { transition: none; }
+  .room-container > * { animation: none; }
+}
+
+/* ==========================================================================
+   Touch devices: prevent tap flash, improve scroll performance
+   ========================================================================== */
+@media (pointer: coarse) {
+  * { -webkit-tap-highlight-color: transparent; }
+  .sidebar, .modal-body, .details {
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
 }

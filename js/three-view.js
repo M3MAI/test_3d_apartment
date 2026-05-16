@@ -43,23 +43,37 @@ function isMobileLike() {
   const lowMem   = (navigator.deviceMemory || 8) <= 4;
   return coarse && (small || lowCores || lowMem);
 }
+function isTabletLike() {
+  // Tablets: touch-primary but with larger screens (>= 768px short side) and
+  // decent hardware. They can handle more than phones but less than desktops.
+  const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const shortSide = Math.min(window.innerWidth || 9999, window.innerHeight || 9999);
+  const isLargeTouch = coarse && shortSide >= 768;
+  const decentHW = (navigator.hardwareConcurrency || 8) >= 4 && (navigator.deviceMemory || 8) >= 4;
+  return isLargeTouch && decentHW;
+}
 function getRendererProfile() {
   let forced = null;
   try { forced = localStorage.getItem("apt_3d_quality"); } catch (_) {}
-  const low = forced ? (forced === "low") : isMobileLike();
+  const isPhone = forced ? (forced === "low") : isMobileLike();
+  const isTablet = !isPhone && (forced ? false : isTabletLike());
+  const low = isPhone;
+  const mid = isTablet;
   return {
     low,
-    // Cap DPR: 1.0 on mobile (huge perf win), 2 on desktop.
-    pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.0 : 2),
-    // Smaller shadow maps on mobile keep shadows on (so the scene doesn't
-    // look flat) but quarter the depth-pass cost.
-    shadowMapSize: low ? 256 : 1024,         // single-room directional light
-    aptShadowMapSize: low ? 512 : 2048,      // apartment sun
-    // On mobile, disable shadows entirely on GLB model meshes — they are
-    // the single largest GPU cost (each shadow-casting mesh = extra draw call).
+    mid,
+    // Cap DPR: 1.0 on phones (huge perf win), 1.5 on tablets, 2 on desktop.
+    pixelRatio: Math.min(window.devicePixelRatio || 1, low ? 1.0 : mid ? 1.5 : 2),
+    // Shadow maps: small on phones, medium on tablets, large on desktop.
+    shadowMapSize: low ? 256 : mid ? 512 : 1024,
+    aptShadowMapSize: low ? 512 : mid ? 1024 : 2048,
+    // On phones, disable shadows on GLB meshes entirely; on tablets keep them.
     glbShadows: !low,
-    // On mobile, downgrade GLB PBR materials to cheaper Lambert shading.
+    // On phones, downgrade GLB PBR materials to cheaper Lambert shading.
+    // On tablets, keep Standard materials but downscale textures to 1024px.
     simplifyGlbMaterials: low,
+    // Max texture size for GLB models on this tier.
+    glbMaxTextureSize: low ? 512 : mid ? 1024 : 2048,
   };
 }
 // Expose a console-friendly toggle: AptThreeView.setQuality("low"|"high"|"auto").
@@ -1640,10 +1654,10 @@ function buildFurnitureMesh(inst, item) {
         }
         // Ensure frustum culling is on (Three.js default, but some exporters disable it)
         child.frustumCulled = true;
-        // On mobile, downscale large textures (2K/4K) in GLB models to 512px.
+        // On mobile/tablet, downscale large textures (2K/4K) in GLB models.
         // This is the single largest GPU memory win for imported models.
-        if (glbProfile.low) {
-          _downscaleTextures(child.material, 512);
+        if (glbProfile.low || glbProfile.mid) {
+          _downscaleTextures(child.material, glbProfile.glbMaxTextureSize);
         }
       });
       container.add(model);
@@ -2022,6 +2036,9 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
   aptCtx.resizeObs.observe(container);
 
   let last = performance.now();
+  let _aptFrameCount = 0;
+  let _aptNeedsRender = true;
+  const _aptProfile = getRendererProfile();
   const loop = () => {
     aptCtx.raf = requestAnimationFrame(loop);
     // Skip render + movement integration while the tab is hidden — mobile
@@ -2031,11 +2048,14 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    _aptFrameCount++;
 
+    let moved = false;
     if (controls.isLocked) {
       const speed = (move.run ? 700 : 300) * dt; // cm/s
       direction.set(move.r - move.l, 0, move.b - move.f);
       direction.normalize();
+      if (direction.lengthSq() > 0.001) moved = true;
       // Movement in camera space
       controls.moveRight(direction.x * speed);
       controls.moveForward(-direction.z * speed);
@@ -2044,16 +2064,30 @@ function showApartment(container, { rooms, itemsByRoom, findItem, startRoomId })
       p.y = 160;
       p.x = Math.max(10, Math.min(bounds.w - 10, p.x));
       p.z = Math.max(10, Math.min(bounds.h - 10, p.z));
+      _aptNeedsRender = true;
     }
 
-    // Billboard cutouts face camera in walkthrough too
-    furnitureGroup.children.forEach(mesh => {
-      if (mesh.userData._isBillboard) {
-        mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
-      }
-    });
+    // Skip GPU work when nothing changed (pointer unlocked, no resize, etc.)
+    if (!_aptNeedsRender && !controls.isLocked) return;
+
+    // Billboard cutouts face camera (throttled on mobile to every 2nd frame)
+    const bbThrottle = _aptProfile.low ? 2 : 1;
+    if (_aptFrameCount % bbThrottle === 0) {
+      furnitureGroup.children.forEach(mesh => {
+        if (mesh.userData._isBillboard) {
+          mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+        }
+      });
+    }
 
     renderer.render(scene, camera);
+
+    // Minimap: redraw every 3rd frame (saves canvas 2D overhead on mobile)
+    if (_aptFrameCount % 3 === 0) drawMinimap();
+
+    // Reset dirty flag only when pointer is unlocked (when locked, camera
+    // is always potentially moving via mouse look, so keep rendering)
+    if (!controls.isLocked) _aptNeedsRender = false;
   };
   loop();
 }
