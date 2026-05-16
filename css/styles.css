@@ -478,6 +478,12 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
 /* Mobile bottom navigation — hidden on desktop */
 .mobile-bottomnav { display: none; }
 
+/* Selection FAB: hidden on desktop, shown on mobile/tablet when item selected */
+.sel-fab {
+  display: none; /* hidden on desktop; mobile breakpoint enables it */
+}
+.sel-fab[hidden] { display: none !important; }
+
 /* ==========================================================================
    Responsive: Tablet (761px - 1100px)
    ========================================================================== */
@@ -527,6 +533,36 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
     min-height: 32px;
     align-items: center;
     justify-content: center;
+  }
+  /* Selection FAB: floating button shown when item is selected */
+  .sel-fab:not([hidden]) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 997;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 28px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    animation: fabPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sel-fab:active { transform: translateX(-50%) scale(0.95); }
+  .sel-fab-icon { font-size: 18px; }
+  .sel-fab-label { white-space: nowrap; }
+  @keyframes fabPop {
+    from { opacity: 0; transform: translateX(-50%) scale(0.5); }
+    to   { opacity: 1; transform: translateX(-50%) scale(1); }
   }
 }
 
@@ -670,6 +706,9 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
   .dim-slider { height: 28px; }
   .sel-actions { flex-wrap: wrap; }
   .sel-actions .btn { flex: 1 1 auto; min-width: 60px; }
+
+  /* FAB: sit above the bottom nav */
+  .sel-fab:not([hidden]) { bottom: 68px; }
 
   /* Details sheet: sit above the bottom nav on mobile */
   .details.sheet-visible {

@@ -1295,12 +1295,21 @@ function bindMobileNav() {
   const sheetCloseBtn = document.getElementById("btn-close-sheet");
   if (sheetCloseBtn) {
     sheetCloseBtn.addEventListener("click", () => {
-      state.selectedInstId = null;
-      if (state.selectedInstIds) state.selectedInstIds.clear();
+      // Close the sheet but keep the item selected — show the FAB again
       const dp = document.getElementById("details-panel");
       if (dp) dp.classList.remove("sheet-visible");
-      drawRoom();
-      renderSelection();
+      const fab = document.getElementById("sel-fab");
+      if (fab && state.selectedInstId) fab.hidden = false;
+    });
+  }
+
+  // FAB: opens the full details bottom-sheet when tapped
+  const selFab = document.getElementById("sel-fab");
+  if (selFab) {
+    selFab.addEventListener("click", () => {
+      const dp = document.getElementById("details-panel");
+      if (dp) dp.classList.add("sheet-visible");
+      selFab.hidden = true; // hide FAB while sheet is open
     });
   }
 }
@@ -2441,8 +2450,6 @@ function setupFurnitureInteractions(svg, room) {
     // the user clicked an item already in the set (then keep the set so they
     // can drag the lead item without losing selection).
     if (!state.selectedInstIds.has(instId)) state.selectedInstIds.clear();
-    // Suppress the bottom-sheet during potential drag — it opens on tap (onUp)
-    _suppressSheet = true;
     renderSelection();
     if (prevSelected !== instId) {
       document.querySelectorAll(".furniture.selected").forEach(n => n.classList.remove("selected"));
@@ -2572,7 +2579,6 @@ function setupFurnitureInteractions(svg, room) {
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onUp);
-      _suppressSheet = false;
       drawAlignGuides(svg, [], room); // clear
       if (moved) {
         // push the pre-drag state to history so undo reverts the drag
@@ -2583,10 +2589,6 @@ function setupFurnitureInteractions(svg, room) {
         drawRoom();
         renderSelection();
         updateUndoRedoButtons();
-      } else {
-        // It was a tap, not a drag — show the details bottom-sheet now
-        const dp = document.getElementById("details-panel");
-        if (dp) dp.classList.add("sheet-visible");
       }
     }
     document.addEventListener("mousemove", onMove);
@@ -2694,24 +2696,22 @@ function fitView() {
 }
 
 // ---------- Selection details panel ----------
-// Gate the bottom-sheet during drag: only show on tap (no movement).
-// Set to true by setupFurnitureInteractions.onDown, cleared by onUp.
-let _suppressSheet = false;
 
 function renderSelection() {
   const panel = document.getElementById("selection-info");
   const detailsPanel = document.getElementById("details-panel");
-  // Helper: show/hide the bottom-sheet on tablet/mobile (≤1100px).
-  // On desktop the .details column is always visible via CSS, so this is harmless.
-  const showSheet = () => {
-    if (_suppressSheet) return; // don't open sheet while user might be dragging
-    if (detailsPanel) detailsPanel.classList.add("sheet-visible");
-  };
+  const fab = document.getElementById("sel-fab");
+  const isMobile = window.innerWidth <= 1100;
+
+  // Helpers: show/hide the FAB (mobile) and the bottom-sheet
+  const showFab = () => { if (fab && isMobile) fab.hidden = false; };
+  const hideFab = () => { if (fab) fab.hidden = true; };
   const hideSheet = () => { if (detailsPanel) detailsPanel.classList.remove("sheet-visible"); };
 
   if (!state.activeRoomId) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideFab();
     hideSheet();
     return;
   }
@@ -2735,12 +2735,13 @@ function renderSelection() {
     panel.querySelectorAll("[data-multi-action]").forEach(btn => {
       btn.addEventListener("click", () => handleMultiAction(btn.dataset.multiAction));
     });
-    showSheet();
+    showFab();
     return;
   }
   if (!state.selectedInstId) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideFab();
     hideSheet();
     return;
   }
@@ -2748,6 +2749,7 @@ function renderSelection() {
   if (!inst) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideFab();
     hideSheet();
     return;
   }
@@ -2893,8 +2895,8 @@ function renderSelection() {
       renderSelection();
     });
   }
-  // Show the bottom-sheet on mobile/tablet so the user can access controls
-  showSheet();
+  // Show the FAB on mobile/tablet so the user can open controls when ready
+  showFab();
 }
 
 // fitWithinRoom: use effective dims instead of catalog dims for overridden items
