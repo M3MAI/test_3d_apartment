@@ -95,19 +95,39 @@ a { color: var(--accent); }
 /* ---------- Main grid ---------- */
 main {
   display: grid;
-  grid-template-columns: 280px 1fr 280px;
+  grid-template-columns: 280px 1fr;
   flex: 1;
   overflow: hidden;
   contain: layout style;
 }
-.sidebar, .details {
+/* Details panel lives OUTSIDE <main> to avoid overflow/contain clipping.
+   On desktop: fixed to the right edge of the viewport as a sidebar column. */
+.details {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
   background: var(--panel);
   border-inline-start: 1px solid var(--border);
   padding: 16px;
   overflow-y: auto;
-  contain: content;
+  z-index: 10;
 }
-.sidebar { border-inline-start: none; border-inline-end: 1px solid var(--border); will-change: transform; }
+/* Offset main's stage so it doesn't hide behind the details panel on desktop */
+@media (min-width: 1101px) {
+  main { margin-inline-start: 0; }
+  /* main grid already has 280px sidebar; the stage area needs right margin for details */
+  .stage { margin-inline-end: 280px; }
+}
+.sidebar {
+  background: var(--panel);
+  border-inline-end: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+  contain: content;
+  will-change: transform;
+}
 
 .details-header {
   display: flex;
@@ -462,18 +482,17 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
    Responsive: Tablet (761px - 1100px)
    ========================================================================== */
 @media (max-width: 1100px) {
-  /* Remove layout containment so .details can use position:fixed relative to viewport */
-  main { grid-template-columns: 240px 1fr; contain: style; }
-  .details { contain: none; }
-  /* Details panel: slide-up bottom sheet (instead of hidden) */
+  main { grid-template-columns: 240px 1fr; }
+  /* .stage no longer needs right margin since details becomes a bottom sheet */
+  .stage { margin-inline-end: 0; }
+  /* Details panel: bottom sheet instead of right column */
   .details {
-    position: fixed;
-    bottom: 0;
+    top: auto;
+    width: auto;
     left: 0;
     right: 0;
-    z-index: 998;
+    bottom: 0;
     max-height: 55vh;
-    overflow-y: auto;
     border-radius: 16px 16px 0 0;
     border-inline-start: none;
     border-top: 1px solid var(--border);
@@ -484,6 +503,7 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
     padding-bottom: max(16px, env(safe-area-inset-bottom));
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+    z-index: 998;
   }
   .details.sheet-visible {
     transform: translate3d(0, 0, 0);

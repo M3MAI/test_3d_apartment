@@ -151,15 +151,18 @@
         <span>Shift للجري • انقر للبدء • Esc للخروج</span>
       </div>
     </section>
-
-    <aside class="details" id="details-panel">
-      <div class="details-header">
-        <h2>تفاصيل القطعة</h2>
-        <button class="btn ghost sheet-close-btn" id="btn-close-sheet" title="إغلاق" aria-label="إغلاق">✕</button>
-      </div>
-      <div id="selection-info" class="empty">اختر قطعة لعرض تفاصيلها</div>
-    </aside>
   </main>
+
+  <!-- Details panel: outside <main> so it's never clipped by overflow/contain.
+       On desktop: absolutely positioned in the right column area.
+       On mobile/tablet: bottom-sheet that slides up when an item is selected. -->
+  <aside class="details" id="details-panel">
+    <div class="details-header">
+      <h2>تفاصيل القطعة</h2>
+      <button class="btn ghost sheet-close-btn" id="btn-close-sheet" title="إغلاق" aria-label="إغلاق">✕</button>
+    </div>
+    <div id="selection-info" class="empty">اختر قطعة لعرض تفاصيلها</div>
+  </aside>
 
   <footer class="bottombar">
     <span>تحليل مبني على فيديو التصوير — <a href="docs/ANALYSIS.md">راجع تقرير التحليل</a></span>
