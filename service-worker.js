@@ -7,7 +7,7 @@
 // banner, and the user clicks "تحديث" — which postMessages SKIP_WAITING here
 // and the new SW takes over on the next reload (driven by `controllerchange`
 // in the page).
-const CACHE = "apt-v12";
+const CACHE = "apt-v13";
 const CDN_CACHE = "apt-cdn-v1";   // separate cache for CDN resources (Three.js)
 const ASSETS = [
   "./",
