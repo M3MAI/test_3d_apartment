@@ -109,6 +109,14 @@ main {
 }
 .sidebar { border-inline-start: none; border-inline-end: 1px solid var(--border); will-change: transform; }
 
+.details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+/* Close button: hidden on desktop (panel is always visible), shown on mobile/tablet */
+.sheet-close-btn { display: none; }
+
 .sidebar h2, .details h2 {
   font-size: 13px;
   margin: 0 0 8px 0;
@@ -455,7 +463,49 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
    ========================================================================== */
 @media (max-width: 1100px) {
   main { grid-template-columns: 240px 1fr; }
-  .details { display: none; }
+  /* Details panel: slide-up bottom sheet (instead of hidden) */
+  .details {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 998;
+    max-height: 55vh;
+    overflow-y: auto;
+    border-radius: 16px 16px 0 0;
+    border-inline-start: none;
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.15);
+    transform: translate3d(0, 100%, 0);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 12px 16px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .details.sheet-visible {
+    transform: translate3d(0, 0, 0);
+  }
+  /* Drag handle indicator at top of sheet */
+  .details::before {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 4px;
+    background: var(--muted);
+    border-radius: 2px;
+    margin: 0 auto 10px;
+    opacity: 0.4;
+  }
+  .sheet-close-btn {
+    display: inline-flex;
+    font-size: 16px;
+    padding: 4px 8px;
+    min-width: 32px;
+    min-height: 32px;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 /* ==========================================================================
@@ -598,6 +648,12 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
   .dim-slider { height: 28px; }
   .sel-actions { flex-wrap: wrap; }
   .sel-actions .btn { flex: 1 1 auto; min-width: 60px; }
+
+  /* Details sheet: sit above the bottom nav on mobile */
+  .details.sheet-visible {
+    bottom: 56px; /* height of .mobile-bottomnav */
+    max-height: 45vh;
+  }
 }
 
 /* ---------- View-mode toggle + 3D container ---------- */

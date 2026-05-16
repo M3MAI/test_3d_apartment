@@ -1290,6 +1290,19 @@ function bindMobileNav() {
       setTimeout(closeMobileSidebar, 150);
     }
   });
+
+  // Details bottom-sheet: close button dismisses the sheet and deselects items
+  const sheetCloseBtn = document.getElementById("btn-close-sheet");
+  if (sheetCloseBtn) {
+    sheetCloseBtn.addEventListener("click", () => {
+      state.selectedInstId = null;
+      if (state.selectedInstIds) state.selectedInstIds.clear();
+      const dp = document.getElementById("details-panel");
+      if (dp) dp.classList.remove("sheet-visible");
+      drawRoom();
+      renderSelection();
+    });
+  }
 }
 
 // ---------- 3D wall-visibility toggle ----------
@@ -2676,9 +2689,16 @@ function fitView() {
 // ---------- Selection details panel ----------
 function renderSelection() {
   const panel = document.getElementById("selection-info");
+  const detailsPanel = document.getElementById("details-panel");
+  // Helper: show/hide the bottom-sheet on tablet/mobile (≤1100px).
+  // On desktop the .details column is always visible, so this is a no-op.
+  const showSheet = () => { if (detailsPanel) detailsPanel.classList.add("sheet-visible"); };
+  const hideSheet = () => { if (detailsPanel) detailsPanel.classList.remove("sheet-visible"); };
+
   if (!state.activeRoomId) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideSheet();
     return;
   }
   // Multi-selection summary panel
@@ -2701,17 +2721,20 @@ function renderSelection() {
     panel.querySelectorAll("[data-multi-action]").forEach(btn => {
       btn.addEventListener("click", () => handleMultiAction(btn.dataset.multiAction));
     });
+    showSheet();
     return;
   }
   if (!state.selectedInstId) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideSheet();
     return;
   }
   const inst = state.layouts[state.activeRoomId].find(i => i.instId === state.selectedInstId);
   if (!inst) {
     panel.className = "empty";
     panel.textContent = "اختر قطعة لعرض تفاصيلها";
+    hideSheet();
     return;
   }
   const item = findItem(inst.groupId, inst.itemId);
@@ -2856,6 +2879,8 @@ function renderSelection() {
       renderSelection();
     });
   }
+  // Show the bottom-sheet on mobile/tablet so the user can access controls
+  showSheet();
 }
 
 // fitWithinRoom: use effective dims instead of catalog dims for overridden items
