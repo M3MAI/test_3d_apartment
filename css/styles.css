@@ -462,7 +462,9 @@ body[data-theme="dark"] .bottombar { background: #06091a; color: #9aa3c4; }
    Responsive: Tablet (761px - 1100px)
    ========================================================================== */
 @media (max-width: 1100px) {
-  main { grid-template-columns: 240px 1fr; }
+  /* Remove layout containment so .details can use position:fixed relative to viewport */
+  main { grid-template-columns: 240px 1fr; contain: style; }
+  .details { contain: none; }
   /* Details panel: slide-up bottom sheet (instead of hidden) */
   .details {
     position: fixed;
