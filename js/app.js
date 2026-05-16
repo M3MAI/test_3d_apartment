@@ -938,6 +938,26 @@ function renderCatalog() {
         e.dataTransfer.setData("text/apt-item", JSON.stringify({ groupId: group.id, itemId: item.id }));
         e.dataTransfer.effectAllowed = "copy";
       });
+      // Mobile: tapping a catalog item adds it to the center of the active room
+      // and auto-closes the sidebar drawer, since drag-and-drop is impractical
+      // when the drawer covers the room view.
+      div.addEventListener("click", (e) => {
+        // Skip if clicking edit/delete buttons on custom items
+        if (e.target.closest(".cat-del") || e.target.closest(".cat-edit")) return;
+        if (!isMobileViewport()) return; // desktop keeps drag-and-drop
+        const room = getRoom();
+        if (!room) {
+          toast("اختر غرفة أولاً", "warn");
+          return;
+        }
+        // Close sidebar so user can see the item placed in the room
+        closeMobileSidebar();
+        // Place item at the center of the room
+        const placed = addItemAtRoomCoords(room, group.id, item.id, room.width / 2, room.depth / 2);
+        if (placed) {
+          toast(`تم إضافة ${item.icon || "📦"} ${item.name}`, "ok");
+        }
+      });
       container.appendChild(div);
     });
   });
@@ -2225,6 +2245,9 @@ function bindCatalogTouchDrag() {
       const rect = active.el.getBoundingClientRect();
       active.ghost.style.width = rect.width + "px";
       document.body.appendChild(active.ghost);
+      // On mobile, auto-close the sidebar drawer so the room becomes visible
+      // as a drop target while dragging.
+      if (isMobileViewport()) closeMobileSidebar();
     }
     e.preventDefault(); // stop page scrolling while dragging
     active.ghost.style.left = (t.clientX - 40) + "px";
