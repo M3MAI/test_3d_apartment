@@ -1638,19 +1638,21 @@ function buildFurnitureMesh(inst, item) {
         // Shadows are expensive — on mobile, skip them for GLB meshes.
         child.castShadow = glbProfile.glbShadows;
         child.receiveShadow = glbProfile.glbShadows;
-        // On mobile, downgrade PBR (MeshStandardMaterial) to cheaper Lambert.
-        // This halves the GPU shading cost per fragment.
+        // On mobile, simplify PBR materials to reduce GPU cost while keeping
+        // the model's actual colors.  Instead of swapping to Lambert (which
+        // strips all PBR data and makes everything gray), we keep Standard
+        // but remove the expensive secondary maps.
         if (glbProfile.simplifyGlbMaterials && child.material && child.material.isMeshStandardMaterial) {
-          const oldMat = child.material;
-          const newMat = new THREE.MeshLambertMaterial({
-            color: oldMat.color,
-            map: oldMat.map,
-            transparent: oldMat.transparent,
-            opacity: oldMat.opacity,
-            side: oldMat.side,
-          });
-          child.material = newMat;
-          oldMat.dispose();
+          const m = child.material;
+          // Drop secondary PBR maps (big GPU texture-sampling cost)
+          if (m.normalMap)    { m.normalMap.dispose?.();    m.normalMap = null; }
+          if (m.roughnessMap) { m.roughnessMap.dispose?.(); m.roughnessMap = null; }
+          if (m.metalnessMap) { m.metalnessMap.dispose?.(); m.metalnessMap = null; }
+          if (m.aoMap)        { m.aoMap.dispose?.();        m.aoMap = null; }
+          // Flatten metalness/roughness to simple values so lighting is cheaper
+          m.metalness = Math.min(m.metalness, 0.3);
+          m.roughness = Math.max(m.roughness, 0.6);
+          m.needsUpdate = true;
         }
         // Ensure frustum culling is on (Three.js default, but some exporters disable it)
         child.frustumCulled = true;
