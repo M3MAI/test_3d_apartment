@@ -60,6 +60,8 @@ a { color: var(--accent); }
   box-shadow: 0 2px 8px rgba(0,0,0,.12);
   flex-wrap: wrap;
   gap: 10px;
+  z-index: 20; /* above the fixed details panel */
+  position: relative;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand .logo { font-size: 28px; }
@@ -101,7 +103,8 @@ main {
   contain: layout style;
 }
 /* Details panel lives OUTSIDE <main> to avoid overflow/contain clipping.
-   On desktop: fixed to the right edge of the viewport as a sidebar column. */
+   On desktop (>1100px): fixed right-side column below topbar.
+   On tablet/mobile (≤1100px): bottom-sheet (overridden in media queries below). */
 .details {
   position: fixed;
   top: 0;
@@ -116,9 +119,9 @@ main {
 }
 /* Offset main's stage so it doesn't hide behind the details panel on desktop */
 @media (min-width: 1101px) {
-  main { margin-inline-start: 0; }
-  /* main grid already has 280px sidebar; the stage area needs right margin for details */
-  .stage { margin-inline-end: 280px; }
+  /* In RTL, 'right' CSS is the start side; the details panel is visually on the left.
+     Use margin-left (which is margin-inline-end in RTL) to offset the stage. */
+  .stage { margin-left: 280px; }
 }
 .sidebar {
   background: var(--panel);
